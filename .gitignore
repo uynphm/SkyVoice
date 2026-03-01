@@ -36,3 +36,4 @@ extension/dist/
 extension/node_modules/
 backend/node_modules/
 backend/dist/
+backend/data/seat-test-16k.wav

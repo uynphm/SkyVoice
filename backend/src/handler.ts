@@ -1,10 +1,8 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { NovaSonicBidirectionalStreamClient } from './client';
 import { DefaultAudioInputConfiguration, DefaultSystemPrompt } from './consts';
-import { Buffer } from 'node:buffer';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-    console.log('Received event:', JSON.stringify(event, null, 2));
 
     // Initialize the client
     const client = new NovaSonicBidirectionalStreamClient({
@@ -24,10 +22,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // Register handlers for extraction results
     let extractedResult: any = null;
     session.onEvent('toolUse', (data) => {
-        if (data.toolName === 'InformationExtractionTool') {
-            console.log('EXTRACTED JSON:', data.input);
-            extractedResult = data.input;
-        }
+        console.log(`Tool triggered: ${data.toolName}`, data.input);
+        extractedResult = {
+            tool: data.toolName,
+            input: data.input
+        };
     });
 
     try {

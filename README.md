@@ -1,6 +1,6 @@
-# SkyVoice ✈️
+# SkyVoice 
 
-**Assistive Browser Agent for visually impaired users.**
+**Assistive Browser Agent for visually impaired users**
 
 ## The Problem
 Traditional screen readers often fail on dynamic, complex web interfaces like transportation seat maps, visual calendars, or interactive booking flows. This creates a critical accessibility gap, making it nearly impossible for visually impaired users to book travel or navigate modern web applications independently.
@@ -12,6 +12,12 @@ SkyVoice leverages AI and voice technology to bridge this gap, transforming comp
 
 - **`/extension`**: High-performance React-based Chrome Extension (Vite + Tailwind CSS).
 - **`/backend`**: Node.js backend for processing voice commands and AI integration.
+
+## AI Pipeline Architecture 
+Our system orchestrates specialized Amazon Nova models to handle complex multimodal interactions. For this hackathon, we engineered a highly-optimized, low-latency pipeline to ensure a snappy, real-time user experience:
+
+1. **Nova Sonic (Multimodal I/O & Reasoning)**: Sonic is natively multimodal. We pass it the user's raw audio *and* the current DOM state (available seats) directly in the prompt. Sonic simultaneously transcribes the audio, reasons over the constraints, and returns a single JSON object containing both the chosen seat ID and the explanation script.
+2. **Nova Act & Sonic TTS (Parallel Execution)**: Once the decision is made, we execute the UI action and the voice feedback *at the exact same time*. Nova Act manipulates the DOM to highlight the chosen seat, while Sonic immediately begins streaming the Text-to-Speech explanation back to the user.
 
 ## Getting Started
 
