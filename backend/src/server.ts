@@ -1,16 +1,31 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
 import { NovaSonicBidirectionalStreamClient, StreamSession } from './client';
 import { Buffer } from 'node:buffer';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 // Create the AWS Bedrock client
+if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    console.warn('⚠️ WARNING: AWS credentials (AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY) are NOT defined in environment variable or .env file');
+}
+
 const bedrockClient = new NovaSonicBidirectionalStreamClient({
     requestHandlerConfig: {
         maxConcurrentStreams: 10,
@@ -113,9 +128,14 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('contentStart', data);
     });
 
-    session.onEvent('textOutput', (data) => {
+    session.onEvent('textOutput', (data: any) => {
         console.log('Text output:', data);
         socket.emit('textOutput', data);
+    });
+
+    session.onEvent('transcript', (data: any) => {
+        console.log(`[${socket.id}] Transcript received from Bedrock: "${data.text}" (final=${!!data.final})`);
+        socket.emit('transcript', data);
     });
 
     session.onEvent('audioOutput', (data) => {
@@ -126,6 +146,7 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     session.onEvent('error', (data) => {
         console.error('Error in session:', data);
         socket.emit('error', data);
+        sessionStates.set(socket.id, SessionState.CLOSED);
     });
 
     session.onEvent('toolUse', (data) => {
@@ -168,20 +189,60 @@ io.on('connection', (socket) => {
         try {
             const currentState = sessionStates.get(socket.id);
             console.log(`Initializing session for ${socket.id}, current state: ${currentState}`);
-            if (currentState === SessionState.INITIALIZING || currentState === SessionState.READY || currentState === SessionState.ACTIVE) {
-                console.log(`Session already exists for ${socket.id}, state: ${currentState}`);
+
+            // If ACTIVE, just return success (microphone already streaming)
+            if (currentState === SessionState.ACTIVE) {
+                console.log(`Session already ACTIVE for ${socket.id}`);
                 if (callback) callback({ success: true });
                 return;
             }
 
+            // Clean up any stale session before creating a new one
+            const existingSession = socketSessions.get(socket.id);
+            if (existingSession) {
+                console.log(`Cleaning up stale session for ${socket.id}`);
+                try { bedrockClient.forceCloseSession(socket.id); } catch { }
+                socketSessions.delete(socket.id);
+                sessionStates.delete(socket.id);
+            }
+
             await createNewSession(socket);
 
-            // Start the AWS Bedrock connection
-            console.log(`Starting AWS Bedrock connection for ${socket.id}`);
-            bedrockClient.initiateBidirectionalStreaming(socket.id);
+            // 1. Establish the AWS Bedrock connection
+            console.log(`[${socket.id}] Starting AWS Bedrock connection...`);
+            const streamPromise = bedrockClient.initiateBidirectionalStreaming(socket.id);
 
-            // Update state to active
+            // 2. Perform the atomic setup sequence
+            console.log(`[${socket.id}] Performing atomic setup sequence (setupSessionAndPromptStart, setupSystemPrompt, setupStartAudio)...`);
+            const session = socketSessions.get(socket.id);
+            if (!session) {
+                throw new Error(`Session not found after creation for ${socket.id}`);
+            }
+            await session.setupSessionAndPromptStart();
+            console.log(`[${socket.id}] setupSessionAndPromptStart completed.`);
+            await session.setupSystemPrompt();
+            console.log(`[${socket.id}] setupSystemPrompt completed.`);
+            await session.setupStartAudio();
+            console.log(`[${socket.id}] setupStartAudio completed.`);
+
+            // Start the stream but DON'T await it - it's a long-lived bidirectional stream
+            // Awaiting it would block forever until the stream closes
+            streamPromise.then(() => {
+                console.log(`[${socket.id}] Stream completed.`);
+                sessionStates.set(socket.id, SessionState.CLOSED);
+            }).catch(err => {
+                console.error(`[${socket.id}] Stream error:`, err.message);
+                sessionStates.set(socket.id, SessionState.CLOSED);
+                socket.emit('error', { message: 'Bedrock stream error', details: err.message });
+            });
+
+            // Give stream a moment to initiate then mark as ACTIVE
+            await new Promise(resolve => setTimeout(resolve, 500));
+            console.log(`[${socket.id}] AWS Bedrock bidirectional stream initiating.`);
+
+            // 3. Update state to active
             sessionStates.set(socket.id, SessionState.ACTIVE);
+            console.log(`[${socket.id}] Session ACTIVE. Audio streaming can begin.`);
 
             if (callback) callback({ success: true });
 
@@ -228,6 +289,13 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Simple echo handler for frontend diagnostics
+    socket.on('ping', (callback: any) => {
+        console.log(`[PING] from ${socket.id}`);
+        if (typeof callback === 'function') callback({ pong: true });
+        else socket.emit('pong');
+    });
+
     // Audio input handler with session validation
     socket.on('audioInput', async (audioData) => {
         try {
@@ -237,11 +305,10 @@ io.on('connection', (socket) => {
             // console.log(`Audio input received for ${socket.id}, session exists: ${!!session}, state: ${currentState}`);
 
             if (!session || currentState !== SessionState.ACTIVE) {
-                console.error(`Invalid session state for audio input: session=${!!session}, state=${currentState}`);
-                socket.emit('error', {
-                    message: 'No active session for audio input',
-                    details: `Session exists: ${!!session}, Session state: ${currentState}. Session must be ACTIVE to receive audio.`
-                });
+                // Only log if we have a session but it's not active yet
+                if (session && currentState !== SessionState.ACTIVE) {
+                    // console.log(`Audio dropped: session is still ${currentState}`);
+                }
                 return;
             }
 
@@ -249,6 +316,18 @@ io.on('connection', (socket) => {
             const audioBuffer = typeof audioData === 'string'
                 ? Buffer.from(audioData, 'base64')
                 : Buffer.from(audioData);
+
+            // 🔍 DEBUG: Check volume level
+            let maxVal = 0;
+            for (let i = 0; i < audioBuffer.length; i += 2) {
+                const sample = audioBuffer.readInt16LE(i);
+                maxVal = Math.max(maxVal, Math.abs(sample));
+            }
+            if (maxVal > 10) {
+                console.log(`Streaming ${audioBuffer.length} bytes for ${socket.id} (Peak: ${maxVal})`);
+            } else {
+                // Keep log quiet for silence
+            }
 
             // Stream the audio
             await session.streamAudio(audioBuffer);
@@ -275,7 +354,8 @@ io.on('connection', (socket) => {
             }
 
             await session.setupSessionAndPromptStart();
-            console.log(`Prompt start completed for ${socket.id}`);
+            await session.setupSystemPrompt(); // Add system prompt as FIRST content
+            console.log(`Prompt start and system prompt setup for ${socket.id}`);
         } catch (error) {
             console.error('Error processing prompt start:', error);
             socket.emit('error', {
@@ -344,9 +424,11 @@ io.on('connection', (socket) => {
                 return;
             }
 
+            // Immediately set session state to CLOSED to stop processing incoming audio chunks
+            sessionStates.set(socket.id, SessionState.CLOSED);
+
             console.log('Stop audio requested, beginning proper shutdown sequence');
             cleanupInProgress.set(socket.id, true);
-            sessionStates.set(socket.id, SessionState.CLOSED);
 
             // Chain the closing sequence with timeout protection
             const cleanupPromise = Promise.race([
@@ -365,6 +447,7 @@ io.on('connection', (socket) => {
 
             // Remove from tracking
             socketSessions.delete(socket.id);
+            sessionStates.delete(socket.id);
             cleanupInProgress.delete(socket.id);
 
             // Notify client that session is closed and ready for new chat
@@ -377,8 +460,8 @@ io.on('connection', (socket) => {
             try {
                 bedrockClient.forceCloseSession(socket.id);
                 socketSessions.delete(socket.id);
+                sessionStates.delete(socket.id);
                 cleanupInProgress.delete(socket.id);
-                sessionStates.set(socket.id, SessionState.CLOSED);
             } catch (forceError) {
                 console.error('Error during force cleanup:', forceError);
             }

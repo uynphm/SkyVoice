@@ -1,72 +1,51 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback } from "react"
 import { StatusBanner, type AIState } from "@/components/status-banner"
 import { MicrophoneButton } from "@/components/microphone-button"
 import { WaveformVisualizer } from "@/components/waveform-visualizer"
 import { TranscriptArea } from "@/components/transcript-area"
+import { useAudioStreaming } from "@/hooks/use-audio-streaming"
 import { Plane } from "lucide-react"
 
-const DEMO_TRANSCRIPT = [
-    "I'd like to book a window seat, please.",
-    "Checking available window seats on flight AA 2450...",
-    "Seat 14A is available. Would you like to select it?",
-]
-
-const STATE_SEQUENCE: AIState[] = [
-    "LISTENING",
-    "THINKING",
-    "SELECTING SEAT",
-    "LISTENING",
-]
-
 export default function App() {
-    const [isListening, setIsListening] = useState(false)
     const [aiState, setAiState] = useState<AIState>("IDLE")
     const [transcriptLines, setTranscriptLines] = useState<string[]>([])
-    const [demoIndex, setDemoIndex] = useState(0)
 
-    const handleToggle = useCallback(() => {
-        if (isListening) {
-            setIsListening(false)
-            setAiState("IDLE")
-            return
-        }
+    const onTranscript = (data: any) => {
+        // Bedrock sends partial transcripts (final: false) and final (final: true)
+        const text = data.text;
+        const isFinal = data.final;
 
-        setIsListening(true)
-        setAiState("LISTENING")
-        setTranscriptLines([])
-        setDemoIndex(0)
-    }, [isListening])
+        setTranscriptLines((prev) => {
+            const newLines = [...prev];
 
-    useEffect(() => {
-        if (!isListening) return
+            // If the last line was a partial, replace it. 
+            // If the last line was final, start a new one.
+            // Simplified logic: replace the last line unless we've explicitly moved on.
+            if (newLines.length > 0) {
+                newLines[newLines.length - 1] = text;
+            } else {
+                newLines.push(text);
+            }
 
-        const interval = setInterval(() => {
-            setDemoIndex((prev) => {
-                const next = prev + 1
+            // If it's final, we'll append an empty string next time to start a new line
+            if (isFinal) {
+                newLines.push("");
+            }
 
-                if (next <= DEMO_TRANSCRIPT.length) {
-                    setTranscriptLines(DEMO_TRANSCRIPT.slice(0, next))
-                }
+            return newLines.filter(line => line.trim() !== "" || line === "");
+        });
+    };
 
-                if (next < STATE_SEQUENCE.length) {
-                    setAiState(STATE_SEQUENCE[next])
-                } else {
-                    setAiState("LISTENING")
-                }
+    const onAIStateChange = useCallback((state: any) => {
+        setAiState(state)
+    }, [])
 
-                if (next >= DEMO_TRANSCRIPT.length + 1) {
-                    clearInterval(interval)
-                    return prev
-                }
-
-                return next
-            })
-        }, 2400)
-
-        return () => clearInterval(interval)
-    }, [isListening])
+    const { isListening, toggleStreaming, volume } = useAudioStreaming({
+        onTranscript,
+        onAIStateChange,
+    })
 
     return (
         <main
@@ -99,12 +78,12 @@ export default function App() {
                         className="flex flex-col items-center gap-6"
                     >
                         {/* Waveform */}
-                        <WaveformVisualizer isActive={isListening} />
+                        <WaveformVisualizer isActive={isListening} volume={volume} />
 
                         {/* Microphone Button */}
                         <MicrophoneButton
                             isListening={isListening}
-                            onToggle={handleToggle}
+                            onToggle={toggleStreaming}
                         />
 
                         <p className="text-center text-sm font-medium text-muted-foreground">

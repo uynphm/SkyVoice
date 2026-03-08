@@ -37,3 +37,7 @@ extension/node_modules/
 backend/node_modules/
 backend/dist/
 backend/data/seat-test-16k.wav
+
+customer-service
+
+AWS_NOVA_SONIC_USAGE.md

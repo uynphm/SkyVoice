@@ -152,6 +152,7 @@ interface SessionData {
     isPromptStartSent: boolean;
     isAudioContentStartSent: boolean;
     audioContentId: string;
+    isAudioContentActive: boolean;
 }
 
 export class NovaSonicBidirectionalStreamClient {
@@ -213,7 +214,9 @@ export class NovaSonicBidirectionalStreamClient {
     // Create a new streaming session
     public createStreamSession(sessionId: string = randomUUID(), config?: NovaSonicBidirectionalStreamClientConfig): StreamSession {
         if (this.activeSessions.has(sessionId)) {
-            throw new Error(`Stream session with ID ${sessionId} already exists`);
+            // Stale session — force close it and create fresh
+            console.log(`Session ${sessionId} already exists in activeSessions, force-closing before recreate`);
+            this.forceCloseSession(sessionId);
         }
 
         const session: SessionData = {
@@ -230,7 +233,8 @@ export class NovaSonicBidirectionalStreamClient {
             isActive: true,
             isPromptStartSent: false,
             isAudioContentStartSent: false,
-            audioContentId: randomUUID()
+            audioContentId: randomUUID(),
+            isAudioContentActive: false
         };
 
         this.activeSessions.set(sessionId, session);
@@ -273,11 +277,10 @@ export class NovaSonicBidirectionalStreamClient {
 
         try {
 
-            // Create the bidirectional stream with session-specific async iterator
+            console.log(`[${sessionId}] initiateBidirectionalStreaming: Creating asyncIterable...`);
             const asyncIterable = this.createSessionAsyncIterable(sessionId);
 
-            console.log(`Starting bidirectional stream for session ${sessionId}...`);
-
+            console.log(`[${sessionId}] initiateBidirectionalStreaming: Calling bedrockRuntimeClient.send...`);
             const response = await this.bedrockRuntimeClient.send(
                 new InvokeModelWithBidirectionalStreamCommand({
                     modelId: "amazon.nova-2-sonic-v1:0",
@@ -296,14 +299,10 @@ export class NovaSonicBidirectionalStreamClient {
             // This is the hidden Bedrock stream you want
             if (error.$response && error.$response.body) {
                 try {
-                    const reader = error.$response.body.getReader();
                     const chunks = [];
-
-                    // Read the whole stream into a buffer
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        chunks.push(value);
+                    // Read the whole stream into a buffer using for-await since it's a Node.js stream
+                    for await (const chunk of error.$response.body) {
+                        chunks.push(chunk);
                     }
 
                     const bodyBytes = Buffer.concat(chunks);
@@ -388,7 +387,7 @@ export class NovaSonicBidirectionalStreamClient {
 
         return {
             [Symbol.asyncIterator]: () => {
-                console.log(`AsyncIterable iterator requested for session ${sessionId}`);
+                console.log(`[${sessionId}] AsyncIterable iterator REQUESTED by Bedrock SDK.`);
 
                 return {
                     next: async (): Promise<IteratorResult<InvokeModelWithBidirectionalStreamInput>> => {
@@ -433,7 +432,10 @@ export class NovaSonicBidirectionalStreamClient {
                             const nextEvent = session.queue.shift();
                             eventCount++;
 
-                            //console.log(`Sending event #${ eventCount } for session ${ sessionId }: ${ JSON.stringify(nextEvent).substring(0, 100) }...`);
+                            // Log every event sent to Bedrock (truncate audioInput base64)
+                            const logStr = JSON.stringify(nextEvent);
+                            const isAudio = logStr.includes('"audioInput"');
+                            console.log(`[→ Bedrock] Event #${eventCount}: ${isAudio ? '(audioInput chunk)' : logStr.substring(0, 300)}`);
 
                             return {
                                 value: {
@@ -472,109 +474,108 @@ export class NovaSonicBidirectionalStreamClient {
         if (!session) return;
 
         try {
-            // Iterate through the binary chunks of the EventStream
+            console.log(`[${sessionId}] AWS Bedrock bidirectional stream initiating.`);
+
             for await (const event of response.body) {
-                // Safety check: if the user closed the session manually, stop processing
-                if (!session.isActive) {
-                    console.log(`Session ${sessionId} is no longer active, stopping response processing`);
-                    break;
-                }
+                if (!session.isActive) break;
 
-                // Bedrock sends data in a 'chunk' property containing 'bytes'
+                // 1. Handle actual data chunks (standard case)
                 if (event.chunk?.bytes) {
-                    try {
-                        this.updateSessionActivity(sessionId);
-                        const textResponse = new TextDecoder().decode(event.chunk.bytes);
+                    this.updateSessionActivity(sessionId);
+                    const textResponse = new TextDecoder().decode(event.chunk.bytes);
 
-                        try {
-                            const jsonResponse = JSON.parse(textResponse);
-                            const innerEvent = jsonResponse.event;
+                    // 🔍 ROBUST PARSING: Bedrock can concatenate multiple JSON objects.
+                    // Use a brace-counting approach to extract full JSON objects.
+                    let braceCount = 0;
+                    let startIndex = -1;
 
-                            // 🔍 LOGGING: Log lifecycle events for visibility (optional for production)
-                            if (innerEvent?.usageEvent || innerEvent?.completionStart || innerEvent?.completionEnd) {
-                                // These are metadata events, usually safe to ignore in the main UI
-                                // but helpful for tracking token usage.
-                            }
+                    for (let i = 0; i < textResponse.length; i++) {
+                        const char = textResponse[i];
+                        if (char === '{') {
+                            if (braceCount === 0) startIndex = i;
+                            braceCount++;
+                        } else if (char === '}') {
+                            braceCount--;
+                            if (braceCount === 0 && startIndex !== -1) {
+                                const jsonStr = textResponse.substring(startIndex, i + 1);
+                                try {
+                                    const jsonResponse = JSON.parse(jsonStr);
+                                    const innerEvent = jsonResponse.event || jsonResponse;
 
-                            // 1. Handle TRANSCRIPT (The model's real-time guess of what you said)
-                            if (innerEvent?.transcript) {
-                                this.dispatchEventForSession(sessionId, 'transcript', innerEvent.transcript);
-                            }
+                                    // Log all non-audio events
+                                    const eventType = Object.keys(innerEvent)[0];
+                                    if (eventType !== 'audioOutput' && eventType !== 'transcript') {
+                                        console.log(`[Bedrock Event] ${eventType}:`, JSON.stringify(innerEvent).substring(0, 200));
+                                    } else if (innerEvent.transcript) {
+                                        console.log(`\x1b[32m[TRANSCRIPT]\x1b[0m ${innerEvent.transcript.text} (Final: ${!!innerEvent.transcript.final})`);
+                                    }
 
-                            // 2. Handle TEXT OUTPUT (The Assistant's verbal response tokens)
-                            else if (innerEvent?.textOutput) {
-                                this.dispatchEventForSession(sessionId, 'textOutput', innerEvent.textOutput);
-                            }
+                                    // Dispatch events
+                                    if (innerEvent.transcript) this.dispatchEventForSession(sessionId, 'transcript', innerEvent.transcript);
+                                    else if (innerEvent.textOutput) this.dispatchEventForSession(sessionId, 'textOutput', innerEvent.textOutput);
+                                    else if (innerEvent.audioOutput) this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
+                                    else if (innerEvent.contentStart) this.dispatchEventForSession(sessionId, 'contentStart', innerEvent.contentStart);
+                                    else if (innerEvent.toolUse) {
+                                        console.log(`[TOOL TRIGGERED] ${innerEvent.toolUse.toolName}`);
+                                        this.dispatchEventForSession(sessionId, 'toolUse', innerEvent.toolUse);
+                                        session.toolUseContent = innerEvent.toolUse;
+                                        session.toolUseId = innerEvent.toolUse.toolUseId;
+                                        session.toolName = innerEvent.toolUse.toolName;
+                                    } else if (innerEvent.contentEnd) {
+                                        this.dispatchEventForSession(sessionId, 'contentEnd', innerEvent.contentEnd);
 
-                            // 3. Handle AUDIO OUTPUT (The raw bytes for the Assistant's voice)
-                            else if (innerEvent?.audioOutput) {
-                                this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
-                            }
+                                        if (innerEvent.contentEnd.type === 'TOOL') {
+                                            const toolResult = await this.processToolUse(session.toolName, session.toolUseContent);
+                                            await this.sendToolResult(sessionId, session.toolUseId, toolResult);
+                                            this.dispatchEventForSession(sessionId, 'toolResult', { toolUseId: session.toolUseId, result: toolResult });
+                                        }
+                                        if (innerEvent.contentEnd.type === 'AUDIO' || innerEvent.contentEnd.contentName === session.audioContentId) {
+                                            console.log(`[MULTI-TURN] Bedrock closed audio block ${session.audioContentId}, opening new one`);
+                                            session.isAudioContentActive = false;
+                                            session.audioContentId = randomUUID();
+                                            session.isAudioContentStartSent = false;
 
-                            // 4. Handle CONTENT START (New block of data starting)
-                            else if (innerEvent?.contentStart) {
-                                this.dispatchEventForSession(sessionId, 'contentStart', innerEvent.contentStart);
-                            }
-
-                            // 5. Handle TOOL USE (The model wants to execute a function)
-                            else if (innerEvent?.toolUse) {
-                                console.log(`[TOOL TRIGGERED] ${innerEvent.toolUse.toolName} in session ${sessionId}`);
-                                this.dispatchEventForSession(sessionId, 'toolUse', innerEvent.toolUse);
-
-                                // Buffer tool info to respond when the content block ends
-                                session.toolUseContent = innerEvent.toolUse;
-                                session.toolUseId = innerEvent.toolUse.toolUseId;
-                                session.toolName = innerEvent.toolUse.toolName;
-                            }
-
-                            // 6. Handle CONTENT END (Crucial for executing Tools)
-                            else if (innerEvent?.contentEnd) {
-                                // If the block that just ended was a TOOL block, execute the logic
-                                if (innerEvent.contentEnd.type === 'TOOL') {
-                                    console.log(`Processing tool result for ${session.toolName}`);
-
-                                    // Execute the local tool logic
-                                    const toolResult = await this.processToolUse(session.toolName, session.toolUseContent);
-
-                                    // Send the result BACK to the model so it can continue the conversation
-                                    await this.sendToolResult(sessionId, session.toolUseId, toolResult);
-
-                                    // Notify the frontend that the tool is finished
-                                    this.dispatchEventForSession(sessionId, 'toolResult', {
-                                        toolUseId: session.toolUseId,
-                                        result: toolResult
-                                    });
+                                            if (session.isActive && session.isPromptStartSent) {
+                                                this.addEventToSessionQueue(sessionId, {
+                                                    event: {
+                                                        contentStart: {
+                                                            promptName: session.promptName,
+                                                            contentName: session.audioContentId,
+                                                            type: "AUDIO",
+                                                            interactive: true,
+                                                            role: "USER",
+                                                            audioInputConfiguration: {
+                                                                audioType: "SPEECH",
+                                                                mediaType: "audio/lpcm",
+                                                                encoding: "base64",
+                                                                sampleRateHertz: 16000,
+                                                                sampleSizeBits: 16,
+                                                                channelCount: 1
+                                                            },
+                                                        }
+                                                    }
+                                                });
+                                                session.isAudioContentStartSent = true;
+                                                session.isAudioContentActive = true;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error(`Invalid JSON chunk in ${sessionId}:`, jsonStr);
                                 }
-
-                                this.dispatchEventForSession(sessionId, 'contentEnd', innerEvent.contentEnd);
+                                startIndex = -1;
                             }
-
-                            // 7. Handle Fallback/Unexpected events
-                            else {
-                                const eventKeys = Object.keys(innerEvent || {});
-                                if (eventKeys.length > 0) {
-                                    this.dispatchEventForSession(sessionId, eventKeys[0], innerEvent);
-                                }
-                            }
-
-                        } catch (parseError) {
-                            // Sometimes Bedrock sends malformed JSON or partial chunks during high latency
-                            console.log(`Raw chunk parse error in ${sessionId}:`, textResponse);
                         }
-                    } catch (decodeError) {
-                        console.error(`Error decoding chunk for ${sessionId}:`, decodeError);
                     }
                 }
-
-                // Handle System-level Streaming Errors
+                // 2. Handle System-level Streaming Errors
                 else if (event.modelStreamErrorException) {
                     console.error(`Model stream error for session ${sessionId}:`, event.modelStreamErrorException);
                     this.dispatchEventForSession(sessionId, 'error', {
                         type: 'modelStreamErrorException',
                         details: event.modelStreamErrorException
                     });
-                }
-                else if (event.internalServerException) {
+                } else if (event.internalServerException) {
                     console.error(`Internal server error for session ${sessionId}:`, event.internalServerException);
                     this.dispatchEventForSession(sessionId, 'error', {
                         type: 'internalServerException',
@@ -584,9 +585,7 @@ export class NovaSonicBidirectionalStreamClient {
             }
 
             console.log(`Response stream processing complete for session ${sessionId}`);
-            this.dispatchEventForSession(sessionId, 'streamComplete', {
-                timestamp: new Date().toISOString()
-            });
+            this.dispatchEventForSession(sessionId, 'streamComplete', { timestamp: new Date().toISOString() });
 
         } catch (streamError) {
             console.error(`Critical error in response stream for ${sessionId}:`, streamError);
@@ -602,22 +601,6 @@ export class NovaSonicBidirectionalStreamClient {
     private addEventToSessionQueue(sessionId: string, event: any): void {
         const session = this.activeSessions.get(sessionId);
         if (!session || !session.isActive) return;
-
-        // // In addEventToSessionQueue:
-        // if (JSON.stringify(event).length < 1000) {
-        //     console.log("OUTGOING SHORT EVENT:", JSON.stringify(event));
-        // } else {
-        //     // Only log the event type, not the full base64
-        //     const type =
-        //         event.event?.sessionStart ? "sessionStart" :
-        //             event.event?.promptStart ? "promptStart" :
-        //                 event.event?.contentStart ? "contentStart " + (event.event.contentStart.type || "") :
-        //                     event.event?.audioInput ? "audioInput (base64 elided)" :
-        //                         event.event?.promptEnd ? "promptEnd" :
-        //                             event.event?.sessionEnd ? "sessionEnd" :
-        //                                 "other";
-        //     console.log("OUTGOING EVENT:", type);
-        // }
 
         this.updateSessionActivity(sessionId);
         session.queue.push(event);
@@ -635,7 +618,9 @@ export class NovaSonicBidirectionalStreamClient {
         this.addEventToSessionQueue(sessionId, {
             event: {
                 sessionStart: {
-                    inferenceConfiguration: session.inferenceConfig
+                    sessionConfiguration: {
+                        inferenceConfig: session.inferenceConfig,
+                    }
                 }
             }
         });
@@ -653,7 +638,15 @@ export class NovaSonicBidirectionalStreamClient {
                     textOutputConfiguration: {
                         mediaType: "text/plain",
                     },
-                    audioOutputConfiguration: DefaultAudioOutputConfiguration,
+                    audioOutputConfiguration: {
+                        audioType: "SPEECH",
+                        mediaType: "audio/lpcm",
+                        encoding: "base64",
+                        sampleRateHertz: 24000,
+                        sampleSizeBits: 16,
+                        channelCount: 1,
+                        voiceId: "matthew",
+                    },
                     toolUseOutputConfiguration: {
                         mediaType: "application/json",
                     },
@@ -670,7 +663,7 @@ export class NovaSonicBidirectionalStreamClient {
                             }
                         ]
                     },
-                },
+                }
             }
         });
         session.isPromptStartSent = true;
@@ -693,7 +686,7 @@ export class NovaSonicBidirectionalStreamClient {
                     type: "TEXT",
                     interactive: false,
                     role: "SYSTEM",
-                    textInputConfiguration: textConfig,
+                    textInputConfiguration: DefaultTextConfiguration,
                 },
             }
         });
@@ -782,19 +775,28 @@ export class NovaSonicBidirectionalStreamClient {
                     type: "AUDIO",
                     interactive: true,
                     role: "USER",
-                    audioInputConfiguration: audioConfig,
-                },
+                    audioInputConfiguration: {
+                        audioType: "SPEECH",
+                        mediaType: "audio/lpcm",
+                        encoding: "base64",
+                        sampleRateHertz: 16000,
+                        sampleSizeBits: 16,
+                        channelCount: 1
+                    },
+                }
             }
         });
         session.isAudioContentStartSent = true;
+        session.isAudioContentActive = true;
         console.log(`Initial events setup complete for session ${sessionId}`);
     }
 
     // Stream an audio chunk for a session
     public async streamAudioChunk(sessionId: string, audioData: Buffer): Promise<void> {
         const session = this.activeSessions.get(sessionId);
-        if (!session || !session.isActive || !session.audioContentId) {
-            throw new Error(`Invalid session ${sessionId} for audio streaming`);
+        if (!session || !session.isActive || !session.audioContentId || !session.isAudioContentActive) {
+            // Session or specific audio content no longer active - silently drop
+            return;
         }
         // Convert audio to base64
         const base64Data = audioData.toString('base64');
@@ -857,7 +859,7 @@ export class NovaSonicBidirectionalStreamClient {
                 contentEnd: {
                     promptName: session.promptName,
                     contentName: contentId
-                }
+                },
             }
         });
 
@@ -873,7 +875,7 @@ export class NovaSonicBidirectionalStreamClient {
                 contentEnd: {
                     promptName: session.promptName,
                     contentName: session.audioContentId,
-                }
+                },
             }
         });
 
@@ -885,7 +887,7 @@ export class NovaSonicBidirectionalStreamClient {
         const session = this.activeSessions.get(sessionId);
         if (!session || !session.isPromptStartSent) return;
 
-        await this.addEventToSessionQueue(sessionId, {
+        this.addEventToSessionQueue(sessionId, {
             event: {
                 promptEnd: {
                     promptName: session.promptName
