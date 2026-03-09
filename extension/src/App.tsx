@@ -13,28 +13,31 @@ export default function App() {
     const [transcriptLines, setTranscriptLines] = useState<string[]>([])
 
     const onTranscript = (data: any) => {
-        // Bedrock sends partial transcripts (final: false) and final (final: true)
         const text = data.text;
         const isFinal = data.final;
+        const role = data.role || "USER";
+        const prefix = role === "ASSISTANT" ? "AI: " : "You: ";
 
         setTranscriptLines((prev) => {
             const newLines = [...prev];
 
-            // If the last line was a partial, replace it. 
-            // If the last line was final, start a new one.
-            // Simplified logic: replace the last line unless we've explicitly moved on.
+            // Filter out the empty line we use as a placeholder for the next segment
+            const activeLines = newLines.filter(l => l.trim() !== "");
+            const currentLine = `${prefix}${text}`;
+
             if (newLines.length > 0) {
-                newLines[newLines.length - 1] = text;
+                // Replace the last line (whether it was empty or the previous partial)
+                newLines[newLines.length - 1] = currentLine;
             } else {
-                newLines.push(text);
+                newLines.push(currentLine);
             }
 
-            // If it's final, we'll append an empty string next time to start a new line
             if (isFinal) {
+                // If it's final, we push an empty string so the next partial starts a new line
                 newLines.push("");
             }
 
-            return newLines.filter(line => line.trim() !== "" || line === "");
+            return newLines;
         });
     };
 

@@ -7,7 +7,7 @@ type Socket = any
 export type AIState = "IDLE" | "LISTENING" | "THINKING" | "SELECTING SEAT"
 
 interface UseAudioStreamingProps {
-    onTranscript?: (text: string) => void
+    onTranscript?: (data: any) => void
     onAIStateChange?: (state: AIState) => void
 }
 
@@ -48,12 +48,60 @@ export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStr
         newSocket.on("transcript", (data: any) => {
             console.log("%c[SOCKET] Transcript received:", "color:orange", data)
             const transcript = typeof data === "string" ? data : data.text
-            if (transcript) transcriptHandlerRef.current?.(data) // Pass the full object to handle partials
+            if (transcript) transcriptHandlerRef.current?.({ ...data, text: transcript })
+        })
+
+        newSocket.on("textOutput", (data: any) => {
+            console.log("%c[SOCKET] Text output received:", "color:cyan", data)
+            const text = data.content || data.text
+            if (text) {
+                // Map textOutput to transcript structure for UI consistency
+                transcriptHandlerRef.current?.({
+                    text,
+                    final: true, // Treat textOutput as final since it's a complete chunk
+                    role: data.role
+                })
+            }
         })
 
         newSocket.on("toolUse", (data: any) => {
             if (data.toolName === "parseVoiceInteraction" || data.toolName === "parse_voice_interaction") {
                 stateHandlerRef.current?.("THINKING")
+            }
+        })
+
+        const nextPlaybackTimeRef = { current: 0 }
+
+        newSocket.on("audioOutput", (data: any) => {
+            if (!audioContextRef.current || !isActiveRef.current) return
+
+            const pcmBase64 = data.audio || data.bytes || (typeof data === 'string' ? data : null)
+            if (!pcmBase64) return
+
+            try {
+                // Decode base64 to PCM Float32
+                const binary = atob(pcmBase64)
+                const bytes = new Uint8Array(binary.length)
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+                const int16 = new Int16Array(bytes.buffer)
+                const float32 = new Float32Array(int16.length)
+                for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768
+
+                // Play using AudioBufferSourceNode
+                const buffer = audioContextRef.current.createBuffer(1, float32.length, 24000)
+                buffer.getChannelData(0).set(float32)
+
+                const source = audioContextRef.current.createBufferSource()
+                source.buffer = buffer
+                source.connect(audioContextRef.current.destination)
+
+                const now = audioContextRef.current.currentTime
+                if (nextPlaybackTimeRef.current < now) nextPlaybackTimeRef.current = now
+
+                source.start(nextPlaybackTimeRef.current)
+                nextPlaybackTimeRef.current += buffer.duration
+            } catch (err) {
+                console.error("Error playing audio chunk:", err)
             }
         })
 
