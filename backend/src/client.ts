@@ -473,6 +473,11 @@ export class NovaSonicBidirectionalStreamClient {
         const session = this.activeSessions.get(sessionId);
         if (!session) return;
 
+        // Persistent parsing state for this session's stream to handle split chunks
+        let braceCount = 0;
+        let startIndex = -1;
+        let accumulatedBuffer = "";
+
         try {
             console.log(`[${sessionId}] AWS Bedrock bidirectional stream initiating.`);
 
@@ -483,21 +488,19 @@ export class NovaSonicBidirectionalStreamClient {
                 if (event.chunk?.bytes) {
                     this.updateSessionActivity(sessionId);
                     const textResponse = new TextDecoder().decode(event.chunk.bytes);
+                    accumulatedBuffer += textResponse;
 
-                    // 🔍 ROBUST PARSING: Bedrock can concatenate multiple JSON objects.
-                    // Use a brace-counting approach to extract full JSON objects.
-                    let braceCount = 0;
-                    let startIndex = -1;
-
-                    for (let i = 0; i < textResponse.length; i++) {
-                        const char = textResponse[i];
+                    // Parse JSON objects from the accumulated buffer
+                    let i = 0;
+                    while (i < accumulatedBuffer.length) {
+                        const char = accumulatedBuffer[i];
                         if (char === '{') {
                             if (braceCount === 0) startIndex = i;
                             braceCount++;
                         } else if (char === '}') {
                             braceCount--;
                             if (braceCount === 0 && startIndex !== -1) {
-                                const jsonStr = textResponse.substring(startIndex, i + 1);
+                                const jsonStr = accumulatedBuffer.substring(startIndex, i + 1);
                                 try {
                                     const jsonResponse = JSON.parse(jsonStr);
                                     const innerEvent = jsonResponse.event || jsonResponse;
@@ -516,11 +519,26 @@ export class NovaSonicBidirectionalStreamClient {
                                     else if (innerEvent.audioOutput) this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
                                     else if (innerEvent.contentStart) this.dispatchEventForSession(sessionId, 'contentStart', innerEvent.contentStart);
                                     else if (innerEvent.toolUse) {
-                                        console.log(`[TOOL TRIGGERED] ${innerEvent.toolUse.toolName}`);
+                                        console.log(`[TOOL TRIGGERED] ${innerEvent.toolUse.toolName}:`, innerEvent.toolUse.content);
                                         this.dispatchEventForSession(sessionId, 'toolUse', innerEvent.toolUse);
-                                        session.toolUseContent = innerEvent.toolUse;
                                         session.toolUseId = innerEvent.toolUse.toolUseId;
                                         session.toolName = innerEvent.toolUse.toolName;
+
+                                        // Extract speech for UI transcript if present
+                                        try {
+                                            const toolContent = JSON.parse(innerEvent.toolUse.content || "{}");
+                                            session.toolUseContent = toolContent;
+                                            if (toolContent.speech) {
+                                                console.log(`[AI SPEECH] ${toolContent.speech}`);
+                                                this.dispatchEventForSession(sessionId, 'transcript', {
+                                                    text: toolContent.speech,
+                                                    final: true,
+                                                    role: "ASSISTANT"
+                                                });
+                                            }
+                                        } catch (e) {
+                                            session.toolUseContent = innerEvent.toolUse.content;
+                                        }
                                     } else if (innerEvent.contentEnd) {
                                         this.dispatchEventForSession(sessionId, 'contentEnd', innerEvent.contentEnd);
 
@@ -530,42 +548,22 @@ export class NovaSonicBidirectionalStreamClient {
                                             this.dispatchEventForSession(sessionId, 'toolResult', { toolUseId: session.toolUseId, result: toolResult });
                                         }
                                         if (innerEvent.contentEnd.type === 'AUDIO' || innerEvent.contentEnd.contentName === session.audioContentId) {
-                                            console.log(`[MULTI-TURN] Bedrock closed audio block ${session.audioContentId}, opening new one`);
+                                            console.log(`[MULTI-TURN] Bedrock closed audio block ${session.audioContentId}. Will re-open on next audio input.`);
                                             session.isAudioContentActive = false;
-                                            session.audioContentId = randomUUID();
                                             session.isAudioContentStartSent = false;
-
-                                            if (session.isActive && session.isPromptStartSent) {
-                                                this.addEventToSessionQueue(sessionId, {
-                                                    event: {
-                                                        contentStart: {
-                                                            promptName: session.promptName,
-                                                            contentName: session.audioContentId,
-                                                            type: "AUDIO",
-                                                            interactive: true,
-                                                            role: "USER",
-                                                            audioInputConfiguration: {
-                                                                audioType: "SPEECH",
-                                                                mediaType: "audio/lpcm",
-                                                                encoding: "base64",
-                                                                sampleRateHertz: 16000,
-                                                                sampleSizeBits: 16,
-                                                                channelCount: 1
-                                                            },
-                                                        }
-                                                    }
-                                                });
-                                                session.isAudioContentStartSent = true;
-                                                session.isAudioContentActive = true;
-                                            }
                                         }
                                     }
                                 } catch (e) {
                                     console.error(`Invalid JSON chunk in ${sessionId}:`, jsonStr);
                                 }
+
+                                // After successful object extraction, remove it from buffer and reset startIndex
+                                accumulatedBuffer = accumulatedBuffer.substring(i + 1);
+                                i = -1; // Reset to start of new buffer for next object
                                 startIndex = -1;
                             }
                         }
+                        i++;
                     }
                 }
                 // 2. Handle System-level Streaming Errors
@@ -794,10 +792,36 @@ export class NovaSonicBidirectionalStreamClient {
     // Stream an audio chunk for a session
     public async streamAudioChunk(sessionId: string, audioData: Buffer): Promise<void> {
         const session = this.activeSessions.get(sessionId);
-        if (!session || !session.isActive || !session.audioContentId || !session.isAudioContentActive) {
-            // Session or specific audio content no longer active - silently drop
-            return;
+        if (!session || !session.isActive) return;
+
+        // Reactive Multi-Turn: If audio block is closed, open a new one before sending chunks
+        if (!session.isAudioContentActive || !session.audioContentId) {
+            session.audioContentId = randomUUID();
+            console.log(`[MULTI-TURN] Opening new audio block ${session.audioContentId} on demand`);
+
+            this.addEventToSessionQueue(sessionId, {
+                event: {
+                    contentStart: {
+                        promptName: session.promptName,
+                        contentName: session.audioContentId,
+                        type: "AUDIO",
+                        interactive: true,
+                        role: "USER",
+                        audioInputConfiguration: {
+                            audioType: "SPEECH",
+                            mediaType: "audio/lpcm",
+                            encoding: "base64",
+                            sampleRateHertz: 16000,
+                            sampleSizeBits: 16,
+                            channelCount: 1
+                        },
+                    }
+                }
+            });
+            session.isAudioContentStartSent = true;
+            session.isAudioContentActive = true;
         }
+
         // Convert audio to base64
         const base64Data = audioData.toString('base64');
 
