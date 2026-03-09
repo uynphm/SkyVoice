@@ -9,10 +9,13 @@ export type AIState = "IDLE" | "LISTENING" | "THINKING" | "SELECTING SEAT"
 interface UseAudioStreamingProps {
     onTranscript?: (data: any) => void
     onAIStateChange?: (state: AIState) => void
+    onHistory?: (history: any[]) => void
 }
 
-export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStreamingProps = {}) {
+export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: UseAudioStreamingProps & { onHistory?: (h: any[]) => void } = {}) {
     const [isListening, setIsListening] = useState(false)
+    const [sessionActive, setSessionActive] = useState(false)
+    const [chromeId, setChromeId] = useState<string>("anonymous")
     const [socket, setSocket] = useState<Socket | null>(null)
     const [volume, setVolume] = useState(0)
     const audioContextRef = useRef<AudioContext | null>(null)
@@ -30,7 +33,14 @@ export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStr
     }, [onTranscript, onAIStateChange])
 
     useEffect(() => {
-        const newSocket = io("http://localhost:5004")
+        // Mocking chromeId for now, would use chrome.runtime.id or similar in production
+        const id = localStorage.getItem('skyvoice_chrome_id') || `user_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('skyvoice_chrome_id', id);
+        setChromeId(id);
+
+        const newSocket = io("http://localhost:5004", {
+            auth: { chromeId: id }
+        })
         setSocket(newSocket)
 
         newSocket.on("connect", () => {
@@ -48,7 +58,9 @@ export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStr
         newSocket.on("transcript", (data: any) => {
             console.log("%c[SOCKET] Transcript received:", "color:orange", data)
             const transcript = typeof data === "string" ? data : data.text
-            if (transcript) transcriptHandlerRef.current?.({ ...data, text: transcript })
+            if (transcript !== undefined && transcript !== null) {
+                transcriptHandlerRef.current?.({ ...data, text: transcript })
+            }
         })
 
         newSocket.on("textOutput", (data: any) => {
@@ -134,6 +146,11 @@ export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStr
             setVolume(0)
             isActiveRef.current = false
             stateHandlerRef.current?.("IDLE")
+        })
+
+        newSocket.on("sessionHistory", (history: any[]) => {
+            console.log("[SOCKET] Received session history:", history)
+            onHistory?.(history)
         })
 
         return () => {
@@ -260,5 +277,5 @@ export function useAudioStreaming({ onTranscript, onAIStateChange }: UseAudioStr
         else startStreaming()
     }, [isListening, startStreaming, stopStreaming])
 
-    return { isListening, toggleStreaming, volume }
+    return { isListening, toggleStreaming, volume, sessionActive, setSessionActive, chromeId }
 }

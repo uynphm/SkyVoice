@@ -34,8 +34,8 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
         const rms = Math.sqrt(sumSquares / channelData.length);
         this.port.postMessage({ type: "volume", rms });
 
-        // 2. Only process non-silence
-        if (rms <= 0.0001) return true;
+        // 2. Only process non-silence (ignore background hiss/noise floor)
+        if (rms <= 0.005) return true;
 
         // 3. Downsample and fill local buffer
         const nativeSR = sampleRate; // global in AudioWorklet scope
