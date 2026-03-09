@@ -41,11 +41,6 @@ export const VoiceInteractionSchema = JSON.stringify({
             "enum": ["select_seat", "ask_preference", "confirm_selection", "navigate", "summarize", "fallback"],
             "description": "The specific intent parsed from the user's speech."
         },
-        "ui_action": {
-            "type": "string",
-            "enum": ["highlight_seat", "zoom_map", "filter_results", "clear_selection", "none"],
-            "description": "The specific visual action the frontend UI must perform in response to this interaction."
-        },
         "data": {
             "type": "object",
             "description": "Specific functional data needed to execute the intent.",
@@ -77,7 +72,7 @@ export const VoiceInteractionSchema = JSON.stringify({
             "description": "Confidence score from 0.0 to 1.0 that the intent was correctly understood."
         }
     },
-    "required": ["reasoning", "next_step", "type", "intent", "ui_action", "speech"]
+    "required": ["reasoning", "next_step", "type", "intent", "speech"]
 });
 
 // // ✅ GOOD (plain object; let JSON.stringify happen only at transport time)
@@ -161,7 +156,6 @@ OUTPUT FORMAT:
   "intent": "select_seat | ask_preference | confirm_selection | navigate | summarize | fallback",
   "reasoning": "short explanation",
   "data": { ... },
-  "ui_action": "highlight_seat | zoom_map | filter_results | none",
   "next_step": "execute_action | ask_clarification | await_user",
   "speech": "what to say to the user",
   "confidence": number

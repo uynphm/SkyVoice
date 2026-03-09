@@ -7,6 +7,7 @@ import { NovaSonicBidirectionalStreamClient, StreamSession } from './client';
 import { Buffer } from 'node:buffer';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { SessionStore, SessionRecord } from './session-store';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,6 +43,8 @@ const bedrockClient = new NovaSonicBidirectionalStreamClient({
 
 // Track active sessions per socket
 const socketSessions = new Map<string, StreamSession>();
+const sessionStore = new SessionStore();
+await sessionStore.init();
 
 // Session states
 enum SessionState {
@@ -133,9 +136,18 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('textOutput', data);
     });
 
-    session.onEvent('transcript', (data: any) => {
+    session.onEvent('transcript', async (data: any) => {
         console.log(`[${socket.id}] Transcript received from Bedrock: "${data.text}" (final=${!!data.final})`);
         socket.emit('transcript', data);
+
+        if (data.final) {
+            const chromeId = socket.handshake.auth.chromeId || socket.id;
+            await sessionStore.addMessage(chromeId, {
+                role: 'USER',
+                text: data.text,
+                timestamp: new Date().toISOString()
+            });
+        }
     });
 
     session.onEvent('audioOutput', (data) => {
@@ -143,15 +155,23 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('audioOutput', data);
     });
 
-    session.onEvent('error', (data) => {
-        console.error('Error in session:', data);
-        socket.emit('error', data);
-        sessionStates.set(socket.id, SessionState.CLOSED);
-    });
-
-    session.onEvent('toolUse', (data) => {
+    // Record AI response when tool is used (which contains speech)
+    session.onEvent('toolUse', async (data) => {
         console.log('Tool use detected:', data.toolName);
         socket.emit('toolUse', data);
+
+        // Extract speech if present
+        try {
+            const content = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+            if (content?.speech) {
+                const chromeId = socket.handshake.auth.chromeId || socket.id;
+                await sessionStore.addMessage(chromeId, {
+                    role: 'ASSISTANT',
+                    text: content.speech,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (e) { }
     });
 
     session.onEvent('toolResult', (data) => {
@@ -190,12 +210,25 @@ io.on('connection', (socket) => {
             const currentState = sessionStates.get(socket.id);
             console.log(`Initializing session for ${socket.id}, current state: ${currentState}`);
 
-            // If ACTIVE, just return success (microphone already streaming)
-            if (currentState === SessionState.ACTIVE) {
-                console.log(`Session already ACTIVE for ${socket.id}`);
-                if (callback) callback({ success: true });
-                return;
+            // 0. Handle Persistence
+            const chromeId = callback?.chromeId || socket.id;
+            const existingRecord = await sessionStore.getSession(chromeId);
+
+            if (existingRecord) {
+                console.log(`[Session] Found existing session for ${chromeId}, sending history...`);
+                socket.emit('sessionHistory', existingRecord.history);
+            } else {
+                await sessionStore.saveSession({
+                    chromeId,
+                    sessionId: socket.id,
+                    status: 'ACTIVE',
+                    history: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                });
             }
+
+            // If ACTIVE, just return success (microphone already streaming)
 
             // Clean up any stale session before creating a new one
             const existingSession = socketSessions.get(socket.id);

@@ -254,7 +254,6 @@ export class NovaSonicBidirectionalStreamClient {
                 intent: toolUseContent.intent,
                 reasoning: toolUseContent.reasoning,
                 next_step: toolUseContent.next_step,
-                ui_action: toolUseContent.ui_action,
                 data: toolUseContent.data || {},
                 constraints: toolUseContent.constraints || {},
                 context: toolUseContent.context || {},
