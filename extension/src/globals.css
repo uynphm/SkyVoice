@@ -1,12 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
+
+
 
 @custom-variant dark (&:is(.dark *));
 
 /* High-Contrast Accessibility Theme */
 :root {
-    --background: #000000;
-    --foreground: #FFFFFF;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
     --card: #0A0A0A;
     --card-foreground: #FFFFFF;
     --popover: #0A0A0A;
@@ -28,7 +31,8 @@
 }
 
 @theme inline {
-    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-sans: 'Outfit', 'Inter', system-ui, sans-serif;
+    --font-outfit: 'Outfit', sans-serif;
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -60,7 +64,20 @@
     }
 
     body {
-        @apply bg-background text-foreground;
-        font-family: 'Inter', system-ui, sans-serif;
+        @apply bg-[#0a0a0c] text-foreground font-sans;
+    }
+
+    /* Custom Scrollbar */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
     }
 }
