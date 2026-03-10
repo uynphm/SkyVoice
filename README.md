@@ -1,23 +1,34 @@
 # SkyVoice 
 
-**Assistive Browser Agent for visually impaired users**
+**Premium Assistive AI Concierge for Airline Passengers**
 
 ## The Problem
-Traditional screen readers often fail on dynamic, complex web interfaces like transportation seat maps, visual calendars, or interactive booking flows. This creates a critical accessibility gap, making it nearly impossible for visually impaired users to book travel or navigate modern web applications independently.
+Traditional screen readers often struggle with dynamic, complex web interfaces like transportation seat maps, visual calendars, or interactive booking flows. This creates a critical accessibility gap, making it nearly impossible for users with visual impairments to book travel or navigate modern web applications independently.
 
 ## Our Mission
-SkyVoice leverages AI and voice technology to bridge this gap, transforming complex visual layouts into intuitive, conversation-driven interactions. We empower users to navigate the digital world with confidence and autonomy.
+SkyVoice leverages Amazon Nova's cutting-edge multimodal capabilities to transform complex visual layouts into intuitive, conversation-driven interactions. We empower users to navigate the digital world with gold-standard autonomy and a premium concierge experience.
+
+## Recent Engineering Highlights
+
+We've recently optimized the interaction pipeline to reach industry-leading snappiness and reliability:
+
+- **Consolidated AI Response Pipeline**: Engineered a "one turn, one response" system. Nova now delivers its spoken feedback and structured seat data in a single, unified turn, eliminating fragmented "bubble spam" in the UI.
+- **Smart Silence Watchdog**: Implemented a backend-driven Voice Activity Detection (VAD) layer. If the user stops speaking for 1.2s, the system automatically triggers a response, mirroring the reliability of manual "Stop" buttons but in a completely hands-free way.
+- **Cross-Stream Deduplication**: Built a sophisticated message-ID tracking system that merges real-time transcript streams with final tool outputs. Users see a single, clean black bubble for every AI response, even when complex seat selections are happening behind the scenes.
+- **Continuous Audio Streaming**: Modernized the audio pipeline to stream raw audio including ambient silence. This provides Bedrock's Nova model with the full context needed for precise natural language understanding and turn-taking.
 
 ## Project Structure
 
-- **`/extension`**: High-performance React-based Chrome Extension (Vite + Tailwind CSS).
-- **`/backend`**: Node.js backend for processing voice commands and AI integration.
+- **`/extension`**: High-performance React-based Chrome Extension (Vite + Tailwind CSS). Features a glassmorphism design and real-time waveform visualization.
+- **`/backend`**: Node.js backend utilizing `amazon.nova-2-sonic-v1` for real-time multimodal bidirectional streaming.
 
 ## AI Pipeline Architecture 
-Our system orchestrates specialized Amazon Nova models to handle complex multimodal interactions. For this hackathon, we engineered a highly-optimized, low-latency pipeline to ensure a snappy, real-time user experience:
 
-1. **Nova Sonic (Multimodal I/O & Reasoning)**: Sonic is natively multimodal. We pass it the user's raw audio *and* the current DOM state (available seats) directly in the prompt. Sonic simultaneously transcribes the audio, reasons over the constraints, and returns a single JSON object containing both the chosen seat ID and the explanation script.
-2. **Nova Act & Sonic TTS (Parallel Execution)**: Once the decision is made, we execute the UI action and the voice feedback *at the exact same time*. Nova Act manipulates the DOM to highlight the chosen seat, while Sonic immediately begins streaming the Text-to-Speech explanation back to the user.
+Our system orchestrates specialized Amazon Nova models to handle complex multimodal interactions:
+
+1. **Nova Sonic (Multimodal Reasoning)**: Sonic handles the high-performance raw audio processing and simultaneous visual reasoning. It analyzes the user's voice and the UI state (the seat map) in parallel to identify the optimal response.
+2. **Nova Act (Autonomous Execution)**: Once an intent is identified, Nova Act takes over the "acting" phase. It autonomously translates the AI's decision into precise browser interactions, such as selecting the exact coordinates for a window seat or navigating multipage booking flows.
+3. **Sonic TTS (Immediate Feedback)**: While Nova Act is manipulating the DOM, Sonic's TTS engine immediately begins streaming natural, low-latency audio feedback, ensuring the user feels a seamless, real-time response.
 
 ## Getting Started
 
@@ -31,25 +42,14 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
    ```bash
    npm install
    ```
-3. Build the extension:
+3. Run in development mode:
    ```bash
-   npm run build
+   npm run dev
    ```
 4. Load the extension in Chrome:
    - Open `chrome://extensions/`
    - Enable "Developer mode"
-   - Click "Load unpacked" and select the `extension/dist` folder.
-
-### Updating Changes
-
-Whenever you make changes to the extension source code:
-1. **Rebuild the extension**:
-   ```bash
-   npm run build
-   ```
-2. **Refresh in Chrome**:
-   - Go to `chrome://extensions/`
-   - Click the **Refresh** (circular arrow) icon on the SkyVoice extension card.
+   - Click "Load unpacked" and select the `extension` folder (or `dist` after building).
 
 ### Backend Setup
 
@@ -61,11 +61,68 @@ Whenever you make changes to the extension source code:
    ```bash
    npm install
    ```
-3. Build the backend:
-   ```bash
-   npm run build
+3. Create a `.env` file with your AWS credentials:
+   ```env
+   AWS_ACCESS_KEY_ID=your_key
+   AWS_SECRET_ACCESS_KEY=your_secret
+   AWS_REGION=us-east-1
    ```
-4. Deploy to AWS Lambda:
+4. Start the server:
    ```bash
-   npx serverless deploy
+   npm run dev
    ```
+
+#### Option A: Quick Start (AWS Managed Policies)
+
+For rapid development (e.g., during a hackathon), you can attach the following **AWS Managed Policies** directly to your IAM user:
+- `AmazonBedrockFullAccess`
+- `AWSLambda_FullAccess`
+- `AmazonAPIGatewayAdministrator`
+- `AmazonS3FullAccess`
+- `AWSCloudFormationFullAccess`
+- `IAMFullAccess`
+
+#### Option B: Recommended (Least Privilege Policy)
+
+Navigate to the **IAM Console** > **Policies** > **Create policy**, select the **JSON** tab, and paste:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModelWithBidirectionalStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:*:*:model/amazon.nova-2-sonic-v1:0"
+            ]
+        }
+    ]
+}
+```
+
+#### How to setup IAM User via AWS Console (UI):
+
+1. **Create the User**:
+   - Log in to your **AWS Console** and search for **IAM** in the top search bar.
+   - Select **Users** from the sidebar, then click the orange **Create user** button.
+   - **User details**: Give your user a name (like `skyvoice-local-dev`) and click **Next**.
+   - **Permissions options**: Choose the box that says **Attach policies directly**.
+   - **Permissions policies**: Use the search box to find and check the boxes for these 6 policies:
+     - `AmazonBedrockFullAccess`
+     - `AWSLambda_FullAccess`
+     - `AmazonAPIGatewayAdministrator`
+     - `AmazonS3FullAccess`
+     - `AWSCloudFormationFullAccess`
+     - `IAMFullAccess`
+   - Click **Next**, then click **Create user**.
+
+2. **Generate Access Keys**:
+   - In the list of users, click on the name of the user you just created (`skyvoice-local-dev`).
+   - Click the **Security credentials** tab (located in the middle of the screen).
+   - Scroll down to the **Access keys** section and click **Create access key**.
+   - Select **Local code** as the reason, check the confirmation box, and click **Next**.
+   - Click **Create access key** on the final screen.
+   - **IMPORTANT**: Copy the **Access key ID** and **Secret access key** now. Paste them into your `backend/.env` file.
