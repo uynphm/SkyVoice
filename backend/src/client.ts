@@ -153,6 +153,8 @@ interface SessionData {
     isAudioContentStartSent: boolean;
     audioContentId: string;
     isAudioContentActive: boolean;
+    currentContentRole: 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
+    silenceTimer?: NodeJS.Timeout | null;
 }
 
 export class NovaSonicBidirectionalStreamClient {
@@ -234,7 +236,9 @@ export class NovaSonicBidirectionalStreamClient {
             isPromptStartSent: false,
             isAudioContentStartSent: false,
             audioContentId: randomUUID(),
-            isAudioContentActive: false
+            isAudioContentActive: false,
+            currentContentRole: 'USER',
+            silenceTimer: null
         };
 
         this.activeSessions.set(sessionId, session);
@@ -512,25 +516,46 @@ export class NovaSonicBidirectionalStreamClient {
                                         console.log(`\x1b[32m[TRANSCRIPT]\x1b[0m ${innerEvent.transcript.text} (Final: ${!!innerEvent.transcript.final})`);
                                     }
 
-                                    // Dispatch events
-                                    if (innerEvent.transcript) this.dispatchEventForSession(sessionId, 'transcript', innerEvent.transcript);
-                                    else if (innerEvent.textOutput) this.dispatchEventForSession(sessionId, 'textOutput', innerEvent.textOutput);
-                                    else if (innerEvent.audioOutput) this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
-                                    else if (innerEvent.contentStart) this.dispatchEventForSession(sessionId, 'contentStart', innerEvent.contentStart);
-                                    else if (innerEvent.toolUse) {
+                                    // Dispatch events with unique IDs to prevent duplication in UI
+                                    const turnId = innerEvent.textOutput?.completionId || innerEvent.toolUse?.completionId || innerEvent.audioOutput?.completionId;
+
+                                    if (innerEvent.transcript) {
+                                        const role = innerEvent.transcript.role || session.currentContentRole || 'USER';
+                                        this.dispatchEventForSession(sessionId, 'transcript', {
+                                            ...innerEvent.transcript,
+                                            role,
+                                            id: innerEvent.transcript.transcriptId ? `user-${innerEvent.transcript.transcriptId}` : `user-${Date.now()}`
+                                        });
+                                    } else if (innerEvent.textOutput) {
+                                        const role = innerEvent.textOutput.role || session.currentContentRole || 'ASSISTANT';
+                                        const prefix = role.toLowerCase() === 'user' ? 'user' : 'assistant';
+                                        this.dispatchEventForSession(sessionId, 'textOutput', {
+                                            ...innerEvent.textOutput,
+                                            role,
+                                            id: `${prefix}-${turnId}`
+                                        });
+                                    } else if (innerEvent.audioOutput) {
+                                        this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
+                                    } else if (innerEvent.contentStart) {
+                                        if (innerEvent.contentStart.role) {
+                                            session.currentContentRole = innerEvent.contentStart.role;
+                                        }
+                                        this.dispatchEventForSession(sessionId, 'contentStart', innerEvent.contentStart);
+                                    } else if (innerEvent.toolUse) {
                                         console.log(`[TOOL TRIGGERED] ${innerEvent.toolUse.toolName}:`, innerEvent.toolUse.content);
                                         this.dispatchEventForSession(sessionId, 'toolUse', innerEvent.toolUse);
                                         session.toolUseId = innerEvent.toolUse.toolUseId;
                                         session.toolName = innerEvent.toolUse.toolName;
 
-                                        // Extract speech for UI transcript if present
+                                        // Restore speech dispatch for UI with deduplication IDs
                                         try {
                                             const toolContent = JSON.parse(innerEvent.toolUse.content || "{}");
                                             session.toolUseContent = toolContent;
                                             if (toolContent.speech) {
-                                                console.log(`[AI SPEECH] ${toolContent.speech}`);
+                                                console.log(`[AI TOOL SPEECH] ${toolContent.speech}`);
                                                 this.dispatchEventForSession(sessionId, 'transcript', {
                                                     text: toolContent.speech,
+                                                    id: `assistant-${turnId || innerEvent.toolUse.toolUseId}`,
                                                     final: true,
                                                     role: "ASSISTANT"
                                                 });
@@ -538,7 +563,8 @@ export class NovaSonicBidirectionalStreamClient {
                                         } catch (e) {
                                             session.toolUseContent = innerEvent.toolUse.content;
                                         }
-                                    } else if (innerEvent.contentEnd) {
+                                    }
+                                    else if (innerEvent.contentEnd) {
                                         this.dispatchEventForSession(sessionId, 'contentEnd', innerEvent.contentEnd);
 
                                         if (innerEvent.contentEnd.type === 'TOOL') {
@@ -821,6 +847,17 @@ export class NovaSonicBidirectionalStreamClient {
             session.isAudioContentActive = true;
         }
 
+        // Reset silence watchdog timer
+        if (session.silenceTimer) clearTimeout(session.silenceTimer);
+
+        // If silence persists for 1.2s, force contentEnd to get a response (Like manual stop in hotel-cancellation)
+        session.silenceTimer = setTimeout(async () => {
+            if (session.isActive && session.isAudioContentActive) {
+                console.log(`[WATCHDOG] Silence detected in turn. Forcing contentEnd for ${session.audioContentId}`);
+                await this.sendContentEnd(sessionId);
+            }
+        }, 1200);
+
         // Convert audio to base64
         const base64Data = audioData.toString('base64');
 
@@ -892,6 +929,12 @@ export class NovaSonicBidirectionalStreamClient {
     public async sendContentEnd(sessionId: string): Promise<void> {
         const session = this.activeSessions.get(sessionId);
         if (!session || !session.isAudioContentStartSent) return;
+
+        // Clear watchdog timer if it's active
+        if (session.silenceTimer) {
+            clearTimeout(session.silenceTimer);
+            session.silenceTimer = null;
+        }
 
         await this.addEventToSessionQueue(sessionId, {
             event: {
@@ -996,6 +1039,7 @@ export class NovaSonicBidirectionalStreamClient {
             // Ensure cleanup happens even if there's an error
             const session = this.activeSessions.get(sessionId);
             if (session) {
+                if (session.silenceTimer) clearTimeout(session.silenceTimer);
                 session.isActive = false;
                 this.activeSessions.delete(sessionId);
                 this.sessionLastActivity.delete(sessionId);
@@ -1021,6 +1065,7 @@ export class NovaSonicBidirectionalStreamClient {
             console.log(`Force closing session ${sessionId}`);
 
             // Immediately mark as inactive and clean up resources
+            if (session.silenceTimer) clearTimeout(session.silenceTimer);
             session.isActive = false;
             session.closeSignal.next();
             session.closeSignal.complete();
