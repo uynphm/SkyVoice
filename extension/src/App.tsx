@@ -8,6 +8,7 @@ import { Plane, MessageSquare, History, ArrowRight, User, Cpu, Mic } from "lucid
 import { cn } from "@/lib/utils"
 
 interface Message {
+    id?: string;
     role: 'USER' | 'ASSISTANT';
     text: string;
     timestamp: string;
@@ -32,11 +33,20 @@ export default function App() {
     const onTranscript = useCallback((data: any) => {
         if (data && data.text) {
             if (data.final) {
-                setMessages(prev => [...prev, {
-                    role: data.role === 'ASSISTANT' ? 'ASSISTANT' : 'USER',
-                    text: data.text,
-                    timestamp: new Date().toLocaleTimeString()
-                }])
+                setMessages(prev => {
+                    // Deduplication based on ID - only merge if ID specifically matches and IS DEFINED
+                    if (data.id && prev.some(m => m.id === data.id)) {
+                        return prev.map(m => m.id === data.id ? { ...m, text: data.text } : m);
+                    }
+
+                    const isAI = data.role === 'ASSISTANT';
+                    return [...prev, {
+                        id: data.id,
+                        role: isAI ? 'ASSISTANT' : 'USER',
+                        text: data.text,
+                        timestamp: new Date().toLocaleTimeString()
+                    }];
+                });
             }
         }
     }, [])

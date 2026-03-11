@@ -59,7 +59,7 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
             console.log("%c[SOCKET] Transcript received:", "color:orange", data)
             const transcript = typeof data === "string" ? data : data.text
             if (transcript !== undefined && transcript !== null) {
-                transcriptHandlerRef.current?.({ ...data, text: transcript })
+                transcriptHandlerRef.current?.({ ...data, text: transcript, id: data.id })
             }
         })
 
@@ -70,6 +70,7 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
                 // Map textOutput to transcript structure for UI consistency
                 transcriptHandlerRef.current?.({
                     text,
+                    id: data.id,
                     final: true, // Treat textOutput as final since it's a complete chunk
                     role: data.role
                 })
@@ -85,6 +86,7 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
         const nextPlaybackTimeRef = { current: 0 }
 
         newSocket.on("audioOutput", (data: any) => {
+            console.log("%c[SOCKET] Audio output chunk received!", "color:pink")
             if (!audioContextRef.current || !isActiveRef.current) return
 
             const pcmBase64 = data.audio || data.bytes || (typeof data === 'string' ? data : null)
@@ -229,12 +231,24 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
             }
 
             // Resume context if it suspended during the await
-            if (audioContext.state === "suspended") await audioContext.resume()
+            if (audioContext.state === "suspended") {
+                console.log("Resuming suspended AudioContext...")
+                await audioContext.resume()
+            }
+
+            console.log(`[AUDIO] Context Sample Rate: ${audioContext.sampleRate}Hz`)
+            console.log(`[AUDIO] Stream Active: ${stream.active}, Tracks: ${stream.getAudioTracks().length}`)
 
             console.log("Backend READY — wiring audio graph")
 
             // === STEP 3: Wire audio graph using AudioWorklet ===
-            await audioContext.audioWorklet.addModule("/audio-processor.js")
+            try {
+                await audioContext.audioWorklet.addModule("/audio-processor.js")
+                console.log("[AUDIO] AudioWorklet module loaded successfully")
+            } catch (err) {
+                console.error("[AUDIO] FAILED to load AudioWorklet module:", err)
+                throw err
+            }
 
             const source = audioContext.createMediaStreamSource(stream)
             const workletNode = new AudioWorkletNode(audioContext, "audio-capture-processor")
