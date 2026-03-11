@@ -12,6 +12,7 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
         this._active = true;
         this._buffer = new Int16Array(2048); // Accumulate 2048 samples (~128ms at 16kHz)
         this._bufferIndex = 0;
+        console.log("[AudioWorklet] Processor initialized and buffer ready");
         this.port.onmessage = (e) => {
             if (e.data?.type === "stop") this._active = false;
         };
@@ -34,8 +35,9 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
         const rms = Math.sqrt(sumSquares / channelData.length);
         this.port.postMessage({ type: "volume", rms });
 
-        // 2. Only process non-silence (ignore background hiss/noise floor)
-        if (rms <= 0.005) return true;
+        // 2. Continuous Stream Requirement: 
+        // Bedrock needs the silence to trigger its internal VAD correctly.
+        // We calculate RMS here but NEVER filter chunks out.
 
         // 3. Downsample and fill local buffer
         const nativeSR = sampleRate; // global in AudioWorklet scope
@@ -50,7 +52,7 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
 
             if (this._bufferIndex >= this._buffer.length) {
                 // Buffer is full, send it!
-                const sendBuffer = this._buffer.buffer.slice(0);
+                const sendBuffer = this._buffer.buffer.slice(0).slice(0);
                 this.port.postMessage({ type: "audio", pcmBuffer: sendBuffer }, [sendBuffer]);
                 this._bufferIndex = 0;
             }

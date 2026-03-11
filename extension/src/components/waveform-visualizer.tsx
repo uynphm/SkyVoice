@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { useEffect, useRef } from "react"
 
 interface WaveformVisualizerProps {
@@ -61,7 +60,7 @@ export function WaveformVisualizer({ isActive, volume }: WaveformVisualizerProps
                 <div
                     key={i}
                     ref={el => { barsRef.current[i] = el }}
-                    className="w-1.5 rounded-full bg-primary transition-none"
+                    className="w-1.5 rounded-full bg-blue-600 transition-none"
                     style={{ height: "4px" }}
                     aria-hidden="true"
                 />
