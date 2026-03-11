@@ -65,6 +65,11 @@
 
     body {
         @apply bg-[#0a0a0c] text-foreground font-sans;
+        margin: 0;
+        padding: 0;
+        width: 500px;
+        height: 680px;
+        overflow: hidden;
     }
 
     /* Custom Scrollbar */
