@@ -154,7 +154,6 @@ interface SessionData {
     audioContentId: string;
     isAudioContentActive: boolean;
     currentContentRole: 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
-    silenceTimer?: NodeJS.Timeout | null;
 }
 
 export class NovaSonicBidirectionalStreamClient {
@@ -237,8 +236,7 @@ export class NovaSonicBidirectionalStreamClient {
             isAudioContentStartSent: false,
             audioContentId: randomUUID(),
             isAudioContentActive: false,
-            currentContentRole: 'USER',
-            silenceTimer: null
+            currentContentRole: 'USER'
         };
 
         this.activeSessions.set(sessionId, session);
@@ -520,19 +518,15 @@ export class NovaSonicBidirectionalStreamClient {
                                     const turnId = innerEvent.textOutput?.completionId || innerEvent.toolUse?.completionId || innerEvent.audioOutput?.completionId;
 
                                     if (innerEvent.transcript) {
-                                        const role = innerEvent.transcript.role || session.currentContentRole || 'USER';
                                         this.dispatchEventForSession(sessionId, 'transcript', {
                                             ...innerEvent.transcript,
-                                            role,
-                                            id: innerEvent.transcript.transcriptId ? `user-${innerEvent.transcript.transcriptId}` : `user-${Date.now()}`
+                                            role: innerEvent.transcript.role || session.currentContentRole || 'USER',
+                                            id: innerEvent.transcript.transcriptId || `user-${Date.now()}`
                                         });
                                     } else if (innerEvent.textOutput) {
-                                        const role = innerEvent.textOutput.role || session.currentContentRole || 'ASSISTANT';
-                                        const prefix = role.toLowerCase() === 'user' ? 'user' : 'assistant';
                                         this.dispatchEventForSession(sessionId, 'textOutput', {
                                             ...innerEvent.textOutput,
-                                            role,
-                                            id: `${prefix}-${turnId}`
+                                            id: turnId
                                         });
                                     } else if (innerEvent.audioOutput) {
                                         this.dispatchEventForSession(sessionId, 'audioOutput', innerEvent.audioOutput);
@@ -555,7 +549,7 @@ export class NovaSonicBidirectionalStreamClient {
                                                 console.log(`[AI TOOL SPEECH] ${toolContent.speech}`);
                                                 this.dispatchEventForSession(sessionId, 'transcript', {
                                                     text: toolContent.speech,
-                                                    id: `assistant-${turnId || innerEvent.toolUse.toolUseId}`,
+                                                    id: turnId || innerEvent.toolUse.toolUseId,
                                                     final: true,
                                                     role: "ASSISTANT"
                                                 });
@@ -847,17 +841,6 @@ export class NovaSonicBidirectionalStreamClient {
             session.isAudioContentActive = true;
         }
 
-        // Reset silence watchdog timer
-        if (session.silenceTimer) clearTimeout(session.silenceTimer);
-
-        // If silence persists for 1.2s, force contentEnd to get a response (Like manual stop in hotel-cancellation)
-        session.silenceTimer = setTimeout(async () => {
-            if (session.isActive && session.isAudioContentActive) {
-                console.log(`[WATCHDOG] Silence detected in turn. Forcing contentEnd for ${session.audioContentId}`);
-                await this.sendContentEnd(sessionId);
-            }
-        }, 1200);
-
         // Convert audio to base64
         const base64Data = audioData.toString('base64');
 
@@ -929,12 +912,6 @@ export class NovaSonicBidirectionalStreamClient {
     public async sendContentEnd(sessionId: string): Promise<void> {
         const session = this.activeSessions.get(sessionId);
         if (!session || !session.isAudioContentStartSent) return;
-
-        // Clear watchdog timer if it's active
-        if (session.silenceTimer) {
-            clearTimeout(session.silenceTimer);
-            session.silenceTimer = null;
-        }
 
         await this.addEventToSessionQueue(sessionId, {
             event: {
@@ -1039,7 +1016,6 @@ export class NovaSonicBidirectionalStreamClient {
             // Ensure cleanup happens even if there's an error
             const session = this.activeSessions.get(sessionId);
             if (session) {
-                if (session.silenceTimer) clearTimeout(session.silenceTimer);
                 session.isActive = false;
                 this.activeSessions.delete(sessionId);
                 this.sessionLastActivity.delete(sessionId);
@@ -1065,7 +1041,6 @@ export class NovaSonicBidirectionalStreamClient {
             console.log(`Force closing session ${sessionId}`);
 
             // Immediately mark as inactive and clean up resources
-            if (session.silenceTimer) clearTimeout(session.silenceTimer);
             session.isActive = false;
             session.closeSignal.next();
             session.closeSignal.complete();

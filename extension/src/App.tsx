@@ -85,19 +85,19 @@ export default function App() {
 
     if (!hasStarted) {
         return (
-            <main className="flex min-h-screen items-center justify-center bg-[#0a0a0c] p-4">
-                <div className="w-full max-w-[420px] overflow-hidden rounded-[2rem] border border-white/10 bg-[#121216] shadow-2xl">
+            <main className="w-[500px] h-[680px] bg-[#0a0a0c] flex items-center justify-center">
+                <div className="flex h-full w-full flex-col overflow-hidden bg-[#121216]">
                     <div className="relative h-48 w-full bg-gradient-to-br from-blue-600 to-indigo-900 px-8 pt-12">
                         <Plane className="absolute right-8 top-12 h-24 w-24 text-white/10 rotate-12" />
                         <h1 className="text-4xl font-bold text-white tracking-tight font-sans">SkyVoice</h1>
-                        <p className="text-blue-100/80 mt-2 font-medium font-sans">Your personal sky concierge.</p>
+                        <p className="text-blue-100/80 mt-2 font-medium font-sans">Running everything at the sound of your voice.</p>
                     </div>
 
                     <div className="p-8 space-y-8">
                         <div className="space-y-4">
-                            <h2 className="text-xl font-semibold text-white font-sans">Welcome back</h2>
+                            <h2 className="text-xl font-semibold text-white font-sans">Ready to navigate</h2>
                             <p className="text-gray-400 text-sm leading-relaxed font-sans">
-                                I'm ready to help you find the perfect seat. We can continue where we left off or start a fresh trip.
+                                I can help you navigate complex web pages — from booking seats and filtering results to filling forms and exploring any web UI, all hands-free.
                             </p>
                         </div>
 
@@ -120,7 +120,7 @@ export default function App() {
                                 className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 font-bold text-white transition-all hover:bg-white/10 active:scale-95"
                             >
                                 <History className="h-5 w-5" />
-                                <span className="font-sans">Resume Last Trip</span>
+                                <span className="font-sans">Resume Last Session</span>
                             </button>
                         </div>
 
@@ -135,10 +135,10 @@ export default function App() {
     }
 
     return (
-        <main className="flex min-h-screen items-center justify-center bg-[#0a0a0c] p-4">
-            <div className="flex h-[700px] w-full max-w-[450px] flex-col overflow-hidden rounded-[2.5rem] border border-white/10 bg-[#121216] shadow-2xl">
+        <main className="w-[500px] h-[590px] bg-[#0a0a0c] flex items-center justify-center">
+            <div className="flex h-full w-full flex-col overflow-hidden bg-[#121216]">
                 {/* Header */}
-                <header className="flex items-center justify-between border-b border-white/5 bg-white/[0.02] px-6 py-5 backdrop-blur-md">
+                <header className="flex items-center justify-between border-b border-white/5 bg-white/[0.02] px-6 py-3 backdrop-blur-md">
                     <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/20">
                             <Plane className="h-5 w-5 text-white" />
@@ -156,7 +156,7 @@ export default function App() {
                 </header>
 
                 {/* Chat Area */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                     {messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-4 px-8">
                             <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center">
@@ -170,25 +170,25 @@ export default function App() {
                         <div
                             key={i}
                             className={cn(
-                                "flex w-full items-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300",
+                                "flex w-full items-start gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300",
                                 msg.role === 'USER' ? "flex-row-reverse" : "flex-row"
                             )}
                         >
                             <div className={cn(
-                                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border",
+                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
                                 msg.role === 'USER' ? "border-blue-500/30 bg-blue-500/10 text-blue-400" : "border-white/10 bg-white/5 text-gray-400"
                             )}>
-                                {msg.role === 'USER' ? <User className="h-4 w-4" /> : <Cpu className="h-4 w-4" />}
+                                {msg.role === 'USER' ? <User className="h-5 w-5" /> : <Cpu className="h-5 w-5" />}
                             </div>
                             <div className={cn(
-                                "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm font-sans",
+                                "max-w-[80%] rounded-2xl px-5 py-4 text-base leading-relaxed shadow-sm font-sans",
                                 msg.role === 'USER'
                                     ? "bg-blue-600 text-white rounded-tr-none shadow-blue-500/10"
                                     : "bg-black text-gray-200 border border-white/10 rounded-tl-none shadow-black/40"
                             )}>
                                 {msg.text}
                                 <div className={cn(
-                                    "mt-1.5 text-[9px] font-medium opacity-50",
+                                    "mt-1.5 text-[10px] font-medium opacity-50",
                                     msg.role === 'USER' ? "text-right" : "text-left"
                                 )}>
                                     {msg.timestamp}
@@ -200,8 +200,8 @@ export default function App() {
                 </div>
 
                 {/* Footer Controls */}
-                <footer className="border-t border-white/5 bg-white/[0.01] p-6 pb-8">
-                    <div className="flex flex-col items-center gap-6">
+                <footer className="border-t border-white/5 bg-white/[0.01] p-4">
+                    <div className="flex flex-col items-center gap-3">
                         <WaveformVisualizer isActive={isListening} volume={volume} />
 
                         <div className="flex w-full items-center justify-between gap-4">
