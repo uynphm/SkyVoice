@@ -1,0 +1,15 @@
+version: '3.9'
+services:
+  skyvoice-backend:
+    build: .
+    ports:
+      - "5004:5004"
+    environment:
+      NODE_ENV: production
+      PORT: "5004"
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+    restart: unless-stopped

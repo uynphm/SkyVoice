@@ -1,22 +1,22 @@
 {
     "name": "skyvoice-backend",
     "version": "1.0.0",
-    "description": "AWS Lambda backend for SkyVoice assistive agent",
-    "main": "dist/handler.js",
+    "description": "SkyVoice backend — Nova Sonic + Socket.IO",
+    "main": "dist/server.cjs",
     "type": "module",
     "scripts": {
-        "build": "esbuild src/handler.ts --bundle --minify --sourcemap --platform=node --target=node20 --outfile=dist/handler.cjs",
-        "watch": "esbuild src/handler.ts --bundle --watch --platform=node --target=node20 --outfile=dist/handler.cjs",
+        "dev": "node --experimental-vm-modules --loader ts-node/esm src/server.ts",
+        "build": "esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.cjs --external:@aws-sdk/* --external:@smithy/*",
+        "start": "node dist/server.cjs",
         "lint": "tsc --noEmit"
     },
-    "keywords": [],
-    "author": "",
-    "license": "ISC",
     "dependencies": {
         "@aws-sdk/client-bedrock-agent-runtime": "^3.782",
         "@aws-sdk/client-bedrock-runtime": "^3.785",
         "@smithy/node-http-handler": "^4.4.12",
         "@smithy/types": "^4.13.0",
+        "@supabase/supabase-js": "^2.49.0",
+        "dotenv": "^17.3.1",
         "express": "^5.2.1",
         "rxjs": "^7.8.2",
         "socket.io": "^4.8.3"
@@ -26,6 +26,7 @@
         "@types/express": "^5.0.6",
         "@types/node": "^20.17.19",
         "esbuild": "^0.25.0",
+        "ts-node": "^10.9.2",
         "typescript": "^5.7.3"
     }
 }

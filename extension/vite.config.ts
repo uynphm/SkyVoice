@@ -10,13 +10,20 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             input: {
-                popup: fileURLToPath(new URL('./index.html', import.meta.url)),
-                'seat-demo': fileURLToPath(new URL('./seat-demo.html', import.meta.url)),
+                popup:            fileURLToPath(new URL('./index.html',        import.meta.url)),
+                'seat-demo':      fileURLToPath(new URL('./seat-demo.html',    import.meta.url)),
+                background:       fileURLToPath(new URL('./src/background.ts', import.meta.url)),
+                'content-script': fileURLToPath(new URL('./src/content-script.ts', import.meta.url)),
             },
             output: {
-                // Avoid __ prefixed chunk names that Chrome rejects
                 chunkFileNames: 'assets/[name]-[hash].js',
-                entryFileNames: 'assets/[name]-[hash].js',
+                entryFileNames: (chunk) => {
+                    // background.js và content-script.js phải ở root dist/
+                    if (['background', 'content-script'].includes(chunk.name)) {
+                        return '[name].js'
+                    }
+                    return 'assets/[name]-[hash].js'
+                },
                 assetFileNames: 'assets/[name]-[hash].[ext]',
             },
         },

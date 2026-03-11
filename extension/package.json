@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "vite",
         "build": "tsc --noEmit && vite build",
-        "postbuild": "shx cp manifest.json dist/manifest.json && shx mkdir -p dist/icons && shx cp public/icons/*.png dist/icons/",
+        "postbuild": "shx cp manifest.json dist/manifest.json && shx mkdir -p dist/icons && shx cp public/icons/*.png dist/icons/ && shx cp public/audio-processor.js dist/audio-processor.js",
         "preview": "vite preview"
     },
     "dependencies": {
@@ -16,13 +16,16 @@
         "lucide-react": "^0.564.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+        "socket.io-client": "^4.8.3",
         "tailwind-merge": "^3.5.0"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.2.0",
+        "@types/chrome": "^0.0.300",
         "@types/node": "^25.3.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
+        "@types/socket.io-client": "^1.4.36",
         "@vitejs/plugin-react": "^4.3.4",
         "shx": "^0.4.0",
         "tailwindcss": "^4.2.0",
