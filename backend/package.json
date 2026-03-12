@@ -14,9 +14,10 @@
     "license": "ISC",
     "dependencies": {
         "@aws-sdk/client-bedrock-agent-runtime": "^3.782",
-        "@aws-sdk/client-bedrock-runtime": "^3.785",
+        "@aws-sdk/client-bedrock-runtime": "^3.1006.0",
         "@smithy/node-http-handler": "^4.4.12",
         "@smithy/types": "^4.13.0",
+        "@supabase/supabase-js": "^2.99.1",
         "dotenv": "^17.3.1",
         "express": "^5.2.1",
         "rxjs": "^7.8.2",
