@@ -4,8 +4,9 @@ import { useState, useCallback, useEffect, useRef } from "react"
 import { StatusBanner, type AIState } from "@/components/status-banner"
 import { WaveformVisualizer } from "@/components/waveform-visualizer"
 import { useAudioStreaming } from "@/hooks/use-audio-streaming"
-import { Plane, MessageSquare, History, ArrowRight, User, Cpu, Mic } from "lucide-react"
+import { Plane, MessageSquare, History, ArrowRight, Mic } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MessageBubble } from "@/components/message-bubble"
 
 interface Message {
     id?: string;
@@ -34,15 +35,27 @@ export default function App() {
         if (data && data.text) {
             if (data.final) {
                 setMessages(prev => {
-                    // Deduplication based on ID - only merge if ID specifically matches and IS DEFINED
-                    if (data.id && prev.some(m => m.id === data.id)) {
-                        return prev.map(m => m.id === data.id ? { ...m, text: data.text } : m);
+                    const normalizedRole = typeof data.role === 'string' ? data.role.toUpperCase() : 'USER';
+                    const isAI = normalizedRole === 'ASSISTANT';
+                    const incomingRole = isAI ? 'ASSISTANT' as const : 'USER' as const;
+
+                    // Update only when both id and role match (id+role key semantics).
+                    if (data.id && prev.some(m => m.id === data.id && m.role === incomingRole)) {
+                        return prev.map(m =>
+                            m.id === data.id && m.role === incomingRole ? { ...m, text: data.text } : m
+                        );
                     }
 
-                    const isAI = data.role === 'ASSISTANT';
+                    if (isAI && prev.length > 0) {
+                        const last = prev[prev.length - 1];
+                        if (last.role === 'ASSISTANT' && last.text === data.text) {
+                            return prev;
+                        }
+                    }
+
                     return [...prev, {
                         id: data.id,
-                        role: isAI ? 'ASSISTANT' : 'USER',
+                        role: incomingRole,
                         text: data.text,
                         timestamp: new Date().toLocaleTimeString()
                     }];
@@ -53,11 +66,13 @@ export default function App() {
 
     const onHistory = useCallback((history: any[]) => {
         if (!Array.isArray(history)) return
-        const formatted = history.filter(h => h && h.role !== 'SYSTEM').map(h => ({
-            role: (h.role === 'ASSISTANT' ? 'ASSISTANT' : 'USER') as 'USER' | 'ASSISTANT',
-            text: h.text || "",
-            timestamp: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()
-        }))
+        const formatted = history
+            .filter(h => h && String(h.role).toUpperCase() !== 'SYSTEM')
+            .map(h => ({
+                role: (String(h.role).toUpperCase() === 'ASSISTANT' ? 'ASSISTANT' : 'USER') as 'USER' | 'ASSISTANT',
+                text: h.text || "",
+                timestamp: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()
+            }))
         setMessages(formatted)
         if (formatted.length > 0) setHasStarted(true)
     }, [])
@@ -162,7 +177,7 @@ export default function App() {
                             <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center">
                                 <MessageSquare className="h-8 w-8 text-white/20" />
                             </div>
-                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "I'm looking for a window seat."</p>
+                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "Book me a flight from Seattle to San Francisco."</p>
                         </div>
                     )}
 
@@ -170,30 +185,15 @@ export default function App() {
                         <div
                             key={i}
                             className={cn(
-                                "flex w-full items-start gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300",
-                                msg.role === 'USER' ? "flex-row-reverse" : "flex-row"
+                                "flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
+                                msg.role === 'USER' ? "justify-end" : "justify-start"
                             )}
                         >
-                            <div className={cn(
-                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
-                                msg.role === 'USER' ? "border-blue-500/30 bg-blue-500/10 text-blue-400" : "border-white/10 bg-white/5 text-gray-400"
-                            )}>
-                                {msg.role === 'USER' ? <User className="h-5 w-5" /> : <Cpu className="h-5 w-5" />}
-                            </div>
-                            <div className={cn(
-                                "max-w-[80%] rounded-2xl px-5 py-4 text-base leading-relaxed shadow-sm font-sans",
-                                msg.role === 'USER'
-                                    ? "bg-blue-600 text-white rounded-tr-none shadow-blue-500/10"
-                                    : "bg-black text-gray-200 border border-white/10 rounded-tl-none shadow-black/40"
-                            )}>
-                                {msg.text}
-                                <div className={cn(
-                                    "mt-1.5 text-[10px] font-medium opacity-50",
-                                    msg.role === 'USER' ? "text-right" : "text-left"
-                                )}>
-                                    {msg.timestamp}
-                                </div>
-                            </div>
+                            <MessageBubble
+                                role={msg.role}
+                                text={msg.text}
+                                timestamp={msg.timestamp}
+                            />
                         </div>
                     ))}
                     <div ref={chatEndRef} />

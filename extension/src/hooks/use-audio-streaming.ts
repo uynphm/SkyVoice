@@ -67,12 +67,13 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
             console.log("%c[SOCKET] Text output received:", "color:cyan", data)
             const text = data.content || data.text
             if (text) {
+                const normalizedRole = typeof data.role === "string" ? data.role.toUpperCase() : "ASSISTANT"
                 // Map textOutput to transcript structure for UI consistency
                 transcriptHandlerRef.current?.({
                     text,
                     id: data.id,
                     final: true, // Treat textOutput as final since it's a complete chunk
-                    role: data.role
+                    role: normalizedRole
                 })
             }
         })
