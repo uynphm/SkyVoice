@@ -31,22 +31,32 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
 3. **Sonic TTS (Immediate Feedback)**: While Nova Act is manipulating the DOM, Sonic's TTS engine immediately begins streaming natural, low-latency audio feedback, ensuring the user feels a seamless, real-time response.
 
 ## Getting Started
-
 ### Nova Act Service Setup
 
+<<<<<<< HEAD
+### Nova Act Service Setup
+
+=======
+>>>>>>> origin/main
 1. Navigate to the Nova Act service directory:
    ```bash
    cd backend/nova-act-service
    ```
 2. Create a virtual environment and install dependencies:
    ```bash
+<<<<<<< HEAD
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
+=======
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+>>>>>>> origin/main
    pip install -r requirements.txt
    ```
 3. Configure your `.env` file with your Nova Act API key:
    ```env
    NOVA_ACT_API_KEY=your_key_from_nova.amazon.com
+<<<<<<< HEAD
    NOVA_ACT_TARGET_URL=http://localhost:5173/seat-demo.html
    NOVA_ACT_HEADLESS=false
    NOVA_ACT_PORT=5005
@@ -57,6 +67,35 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
    ```
    The service runs on port 5005 by default. Without a valid `NOVA_ACT_API_KEY`, it operates in dry-run mode (logs actions without opening a browser).
 
+=======
+   ```
+
+#### Chrome Browser Setup for Nova Act (Sighted Mode)
+
+To allow the AI to attach to your physical browser for demos, you must launch Chrome with remote debugging enabled:
+
+1. **Quit all your Chrome browsers completely** (Cmd+Q on Mac, Alt+F4 on Windows).
+
+2. **Launch via Terminal**:
+   - **Mac (Apple Silicon)**:
+     ```bash
+     arch -arm64 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$(pwd)/nova_profile"
+     ```
+   - **Windows**:
+     ```powershell
+     & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$pwd\nova_profile"
+     ```
+   *Note: Using a dedicated `--user-data-dir` ensures your main browser history/cookies remain isolated.*
+
+3. **Open your target page** (e.g., Ticketmaster or SeatGeek) in the new window.
+
+4. **Start the Sighted Copilot**:
+   - **Mac**: `arch -arm64 python nova.py`
+   - **Windows**: `python nova.py`
+
+**Troubleshooting Precision:**
+If the AI is clicking slightly off-target, ensure your browser window is at or near **1600x813** resolution. The `nova.py` script will attempt to snap the viewport to this "Golden Resolution" automatically for 1:1 coordinate precision.
+>>>>>>> origin/main
 ### Extension Setup
 
 1. Navigate to the `extension` directory:

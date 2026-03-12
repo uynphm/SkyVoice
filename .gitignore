@@ -41,3 +41,7 @@ backend/data/seat-test-16k.wav
 customer-service
 
 AWS_NOVA_SONIC_USAGE.md
+__pycache__/
+.venv/
+
+backend/nova-act-service/chrome_demo_profile/
