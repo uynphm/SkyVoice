@@ -31,9 +31,6 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
 3. **Sonic TTS (Immediate Feedback)**: While Nova Act is manipulating the DOM, Sonic's TTS engine immediately begins streaming natural, low-latency audio feedback, ensuring the user feels a seamless, real-time response.
 
 ## Getting Started
-
-<<<<<<< Updated upstream
-=======
 ### Nova Act Service Setup
 
 1. Navigate to the Nova Act service directory:
@@ -76,8 +73,6 @@ To allow the AI to attach to your physical browser for demos, you must launch Ch
 
 **Troubleshooting Precision:**
 If the AI is clicking slightly off-target, ensure your browser window is at or near **1600x813** resolution. The `nova.py` script will attempt to snap the viewport to this "Golden Resolution" automatically for 1:1 coordinate precision.
-
->>>>>>> Stashed changes
 ### Extension Setup
 
 1. Navigate to the `extension` directory:
