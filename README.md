@@ -32,6 +32,31 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
 
 ## Getting Started
 
+### Nova Act Service Setup
+
+1. Navigate to the Nova Act service directory:
+   ```bash
+   cd backend/nova-act-service
+   ```
+2. Create a virtual environment and install dependencies:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+3. Configure your `.env` file with your Nova Act API key:
+   ```env
+   NOVA_ACT_API_KEY=your_key_from_nova.amazon.com
+   NOVA_ACT_TARGET_URL=http://localhost:5173/seat-demo.html
+   NOVA_ACT_HEADLESS=false
+   NOVA_ACT_PORT=5005
+   ```
+4. Start the service:
+   ```bash
+   python main.py
+   ```
+   The service runs on port 5005 by default. Without a valid `NOVA_ACT_API_KEY`, it operates in dry-run mode (logs actions without opening a browser).
+
 ### Extension Setup
 
 1. Navigate to the `extension` directory:
@@ -69,7 +94,7 @@ Our system orchestrates specialized Amazon Nova models to handle complex multimo
    ```
 4. Start the server:
    ```bash
-   npm run dev
+   npx tsx src/server.ts
    ```
 
 #### Option A: Quick Start (AWS Managed Policies)

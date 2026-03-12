@@ -34,15 +34,23 @@ export default function App() {
         if (data && data.text) {
             if (data.final) {
                 setMessages(prev => {
-                    // Deduplication based on ID - only merge if ID specifically matches and IS DEFINED
                     if (data.id && prev.some(m => m.id === data.id)) {
                         return prev.map(m => m.id === data.id ? { ...m, text: data.text } : m);
                     }
 
-                    const isAI = data.role === 'ASSISTANT';
+                    const normalizedRole = typeof data.role === 'string' ? data.role.toUpperCase() : 'USER';
+                    const isAI = normalizedRole === 'ASSISTANT';
+
+                    if (isAI && prev.length > 0) {
+                        const last = prev[prev.length - 1];
+                        if (last.role === 'ASSISTANT' && last.text === data.text) {
+                            return prev;
+                        }
+                    }
+
                     return [...prev, {
                         id: data.id,
-                        role: isAI ? 'ASSISTANT' : 'USER',
+                        role: isAI ? 'ASSISTANT' as const : 'USER' as const,
                         text: data.text,
                         timestamp: new Date().toLocaleTimeString()
                     }];
@@ -53,11 +61,13 @@ export default function App() {
 
     const onHistory = useCallback((history: any[]) => {
         if (!Array.isArray(history)) return
-        const formatted = history.filter(h => h && h.role !== 'SYSTEM').map(h => ({
-            role: (h.role === 'ASSISTANT' ? 'ASSISTANT' : 'USER') as 'USER' | 'ASSISTANT',
-            text: h.text || "",
-            timestamp: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()
-        }))
+        const formatted = history
+            .filter(h => h && String(h.role).toUpperCase() !== 'SYSTEM')
+            .map(h => ({
+                role: (String(h.role).toUpperCase() === 'ASSISTANT' ? 'ASSISTANT' : 'USER') as 'USER' | 'ASSISTANT',
+                text: h.text || "",
+                timestamp: h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()
+            }))
         setMessages(formatted)
         if (formatted.length > 0) setHasStarted(true)
     }, [])
@@ -162,7 +172,7 @@ export default function App() {
                             <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center">
                                 <MessageSquare className="h-8 w-8 text-white/20" />
                             </div>
-                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "I'm looking for a window seat."</p>
+                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "Book me a flight from Seattle to San Francisco."</p>
                         </div>
                     )}
 

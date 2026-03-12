@@ -179,9 +179,16 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('toolResult', data);
     });
 
-    session.onEvent('contentEnd', (data) => {
+    session.onEvent('contentEnd', async (data) => {
         console.log('Content end received: ', data);
         socket.emit('contentEnd', data);
+        
+        try {
+            const chromeId = socket.handshake.auth.chromeId || socket.id;
+            await sessionStore.addContentEndEvent(chromeId, data);
+        } catch (e) {
+            console.error('Error saving contentEnd event:', e);
+        }
     });
 
     session.onEvent('streamComplete', () => {
