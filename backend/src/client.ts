@@ -248,21 +248,18 @@ export class NovaSonicBidirectionalStreamClient {
         const tool = toolName.toLowerCase();
 
         if (tool === "parsevoiceinteraction" || tool === "parse_voice_interaction") {
-            console.log("Voice Interaction Parsed:");
-            // console.log(JSON.stringify(toolUseContent, null, 2));
+            console.log("Voice Interaction Parsed:", JSON.stringify(toolUseContent, null, 2));
             return {
                 status: "success",
-                action: toolUseContent.type,
+                type: toolUseContent.type,
                 intent: toolUseContent.intent,
                 reasoning: toolUseContent.reasoning,
+                speech: toolUseContent.speech,
                 next_step: toolUseContent.next_step,
                 data: toolUseContent.data || {},
                 constraints: toolUseContent.constraints || {},
-                context: toolUseContent.context || {},
-                speech: toolUseContent.speech,
-                confidence: toolUseContent.confidence
+                confidence: toolUseContent.confidence ?? 1.0,
             };
-
         }
 
         console.log(`Tool ${tool} not supported`);

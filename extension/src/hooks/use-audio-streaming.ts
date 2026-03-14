@@ -4,7 +4,7 @@ import { bufferToBase64 } from "@/lib/pcm-encoder"
 
 type Socket = any
 
-export type AIState = "IDLE" | "LISTENING" | "THINKING" | "SELECTING SEAT"
+export type AIState = "IDLE" | "LISTENING" | "SPEAKING" | "THINKING" | "SELECTING SEAT"
 
 interface UseAudioStreamingProps {
     onTranscript?: (data: any) => void
@@ -18,6 +18,7 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
     const [chromeId, setChromeId] = useState<string>("anonymous")
     const [socket, setSocket] = useState<Socket | null>(null)
     const [volume, setVolume] = useState(0)
+    const [isSpeaking, setIsSpeaking] = useState(false)
     const audioContextRef = useRef<AudioContext | null>(null)
     const streamRef = useRef<MediaStream | null>(null)
     const workletNodeRef = useRef<AudioWorkletNode | null>(null)
@@ -263,16 +264,22 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
                 if (e.data.type === "volume") {
                     setVolume(e.data.rms)
 
-                    // Throttled log
                     const now = Date.now()
                     if (now - lastLogRef.current > 1000) {
                         console.log(`AudioWorklet: RMS=${e.data.rms.toFixed(5)}, ctx=${audioContext.state}`)
                         lastLogRef.current = now
                     }
                 } else if (e.data.type === "audio") {
-                    // Worklet sends raw Int16 PCM ArrayBuffer, wrap it for base64 encoding
                     const pcm = new Int16Array(e.data.pcmBuffer)
                     socket.emit("audioInput", bufferToBase64(pcm))
+                } else if (e.data.type === "speechStart") {
+                    console.log("%c[VAD] Speech started", "color:lime;font-weight:bold")
+                    setIsSpeaking(true)
+                    stateHandlerRef.current?.("SPEAKING")
+                } else if (e.data.type === "speechEnd") {
+                    console.log(`%c[VAD] Speech ended (silence ${e.data.silenceMs?.toFixed(0)}ms)`, "color:gray")
+                    setIsSpeaking(false)
+                    stateHandlerRef.current?.("LISTENING")
                 }
             }
 
@@ -292,5 +299,5 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
         else startStreaming()
     }, [isListening, startStreaming, stopStreaming])
 
-    return { isListening, toggleStreaming, volume, sessionActive, setSessionActive, chromeId }
+    return { isListening, isSpeaking, toggleStreaming, volume, sessionActive, setSessionActive, chromeId }
 }
