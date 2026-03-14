@@ -1,9 +1,9 @@
 import { AudioType, AudioMediaType, TextMediaType } from "./types";
 
 export const DefaultInferenceConfiguration = {
-    maxTokens: 1024,
+    maxTokens: 200,
     topP: 0.9,
-    temperature: 0.7,
+    temperature: 0.2,
 };
 
 export const DefaultAudioInputConfiguration = {
@@ -20,166 +20,122 @@ export const DefaultTextConfiguration = {
 };
 
 export const VoiceInteractionSchema = JSON.stringify({
-    "type": "object",
-    "properties": {
-        "reasoning": {
-            "type": "string",
-            "description": "Brief explanation of why this intent and action were chosen based on the user's input and current context."
+    type: "object",
+    properties: {
+        type: {
+            type: "string",
+            enum: ["action", "clarification", "response", "error"],
+            description:
+                "Interaction category. 'action' = execute a UI change, " +
+                "'clarification' = ask a follow-up, 'response' = general reply, " +
+                "'error' = invalid or unsupported request.",
         },
-        "next_step": {
-            "type": "string",
-            "enum": ["await_user", "execute_action", "ask_clarification"],
-            "description": "The state machine directive for what the system should do immediately after processing this interaction."
+        intent: {
+            type: "string",
+            enum: [
+                "select_seat",
+                "ask_preference",
+                "confirm_selection",
+                "navigate",
+                "summarize",
+                "fallback",
+            ],
+            description: "The specific intent parsed from the user's speech.",
         },
-        "type": {
-            "type": "string",
-            "enum": ["action", "clarification", "response", "error"],
-            "description": "The high-level type of the voice interaction. Use 'action' for UI updates, 'clarification' to ask the user a follow-up, 'response' for general chat, and 'error' if the request is invalid."
+        reasoning: {
+            type: "string",
+            description:
+                "One-sentence explanation of why this intent was chosen.",
         },
-        "intent": {
-            "type": "string",
-            "enum": ["select_seat", "ask_preference", "confirm_selection", "navigate", "summarize", "fallback"],
-            "description": "The specific intent parsed from the user's speech."
+        speech: {
+            type: "string",
+            description:
+                "The ONLY spoken reply to the user. This is read aloud by TTS. " +
+                "Must be natural, warm, and concise (1-2 sentences max).",
         },
-        "data": {
-            "type": "object",
-            "description": "Specific functional data needed to execute the intent.",
-            "properties": {
-                "seat_id": { "type": "string", "description": "e.g., '14A'" },
-                "row": { "type": "number" },
-                "section": { "type": "string", "description": "e.g., 'front', 'back', 'exit_row'" }
-            }
+        next_step: {
+            type: "string",
+            enum: ["await_user", "execute_action", "ask_clarification"],
+            description: "What the system should do after this turn.",
         },
-        "constraints": {
-            "type": "object",
-            "description": "Strict user preferences that must be adhered to.",
-            "properties": {
-                "max_price": { "type": "number" },
-                "location_preference": { "type": "string", "enum": ["window", "aisle", "middle", "any"] },
-                "extra_legroom_required": { "type": "boolean" }
-            }
+        data: {
+            type: "object",
+            description: "Payload for the intent (all fields optional).",
+            properties: {
+                seat_id: { type: "string", description: "e.g. '14A'" },
+                row: { type: "number" },
+                section: {
+                    type: "string",
+                    description: "e.g. 'front', 'back', 'exit_row'",
+                },
+            },
         },
-        "context": {
-            "type": "object",
-            "description": "System state memory (e.g., seats already selected, or previous errors)."
+        constraints: {
+            type: "object",
+            description: "User preferences that must be respected.",
+            properties: {
+                max_price: { type: "number" },
+                location_preference: {
+                    type: "string",
+                    enum: ["window", "aisle", "middle", "any"],
+                },
+                extra_legroom_required: { type: "boolean" },
+            },
         },
-        "speech": {
-            "type": "string",
-            "description": "The script that the Text-to-Speech engine should read aloud to the user."
+        confidence: {
+            type: "number",
+            description: "0.0-1.0 confidence that the intent is correct.",
         },
-        "confidence": {
-            "type": "number",
-            "description": "Confidence score from 0.0 to 1.0 that the intent was correctly understood."
-        }
     },
-    "required": ["reasoning", "next_step", "type", "intent", "speech"]
+    required: ["type", "intent", "reasoning", "speech", "next_step"],
 });
 
-// // ✅ GOOD (plain object; let JSON.stringify happen only at transport time)
-// export const VoiceInteractionSchema = {
-//   "type": "object",
-//   "properties": {
-//     "reasoning": {
-//       "type": "string",
-//       "description": "Brief explanation of why this intent and action were chosen based on the user's input and current context."
-//     },
-//     "next_step": {
-//       "type": "string",
-//       "enum": ["await_user", "execute_action", "ask_clarification"],
-//       "description": "The state machine directive for what the system should do immediately after processing this interaction."
-//     },
-//     "type": {
-//       "type": "string",
-//       "enum": ["action", "clarification", "response", "error"],
-//       "description": "The high-level type of the voice interaction. Use 'action' for UI updates, 'clarification' to ask the user a follow-up, 'response' for general chat, and 'error' if the request is invalid."
-//     },
-//     "intent": {
-//       "type": "string",
-//       "enum": ["select_seat", "ask_preference", "confirm_selection", "navigate", "summarize", "fallback"],
-//       "description": "The specific intent parsed from the user's speech."
-//     },
-//     "ui_action": {
-//       "type": "string",
-//       "enum": ["highlight_seat", "zoom_map", "filter_results", "clear_selection", "none"],
-//       "description": "The specific visual action the frontend UI must perform in response to this interaction."
-//     },
-//     "data": {
-//       "type": "object",
-//       "description": "Specific functional data needed to execute the intent.",
-//       "properties": {
-//         "seat_id": { "type": "string", "description": "e.g., '14A'" },
-//         "row": { "type": "number" },
-//         "section": { "type": "string", "description": "e.g., 'front', 'back', 'exit_row'" }
-//       }
-//     },
-//     "constraints": {
-//       "type": "object",
-//       "description": "Strict user preferences that must be adhered to.",
-//       "properties": {
-//         "max_price": { "type": "number" },
-//         "location_preference": { "type": "string", "enum": ["window", "aisle", "middle", "any"] },
-//         "extra_legroom_required": { "type": "boolean" }
-//       }
-//     },
-//     "context": {
-//       "type": "object",
-//       "description": "System state memory (e.g., seats already selected, or previous errors)."
-//     },
-//     "speech": {
-//       "type": "string",
-//       "description": "The script that the Text-to-Speech engine should read aloud to the user."
-//     },
-//     "confidence": {
-//       "type": "number",
-//       "description": "Confidence score from 0.0 to 1.0 that the intent was correctly understood."
-//     }
-//   },
-//   "required": ["reasoning", "next_step", "type", "intent", "ui_action", "speech"]
-// };
+export const DefaultSystemPrompt = `
+You are SkyVoice, a premium voice concierge for airline passengers.
 
+## CORE RULE — ONE TOOL CALL PER TURN
+Every time the user speaks, you MUST respond with exactly ONE call to
+parseVoiceInteraction. That tool call is your ENTIRE response for the turn.
 
-export const getSkyVoiceSystemPrompt = (): string => `
-You are SkyVoice, a premium and enthusiastic voice concierge for airline passengers. 
+- Do NOT produce free-text speech outside the tool call.
+- Do NOT call the tool more than once per turn.
+- Do NOT generate another response after the tool returns.
+- After the tool call, STOP and wait for the next user utterance.
 
-## STRICT RESPONSE RULES
-1. **ONE RESPONSE PER TURN**: You must provide exactly ONE response to the user's input.
-2. **STOP AND WAIT**: After you have spoken or taken an action, you MUST stop and wait for the user to speak again.
-3. **NO CHAINING**: Do NOT generate multiple responses or conversation turns in a row without user input in between.
-4. **TOOL USE IS FINAL**: If you call a tool (like 'parseVoiceInteraction'), that is your action for the turn. Do not speak again until the tool returns or the user speaks.
+## HOW TO RESPOND
+Put your spoken reply in the "speech" field of the tool JSON.
+The TTS engine reads that field aloud — it is the only voice output.
+Keep speech warm, natural, and concise (1-2 sentences).
 
-## YOUR PERSONALITY
-- You are eager to help, professional, and very proactive.
-- You should sound like a luxury airline concierge.
-- NEVER be silent if the user speaks to you. Even if you just heard "hello", reply with a warm greeting.
+## PERSONALITY
+- Sound like a luxury airline concierge: warm, professional, proactive.
+- Always greet the user if they start a new conversation.
+- Never be silent — even "hello" gets a friendly reply via the tool.
 
-## CORE MISSIONS
-1. **Greet & Guide**: Always greet the user warmly if they start a conversation.
-2. **Detect Intent**: If the user mentions "window", "aisle", "front", or "back", acknowledge it immediately.
-3. **Execute Seat Changes**: Use the 'parseVoiceInteraction' tool as soon as the user identifies a seat or a strong preference.
-4. **Speak & Act**: Always provide your spoken response in the 'speech' field of the tool call.
+## INTENT DETECTION
+- "window", "aisle", "front", "back", "legroom" → seat preference action.
+- "how much", "price", "cheapest" → summarize constraints.
+- Ambiguous input → ask_clarification with a short follow-up question.
+- Off-topic or invalid → type "error", intent "fallback".
 
-## CONVERSATION FLOW
-- USER says: "i want a window seat"
-- YOU say: "Certainly! I'll find the best window seats for you. Would you prefer to be near the front of the cabin or further back?"
-- THEN: Call 'parseVoiceInteraction' with the preference data.
-- FINALLY: Stop and wait for the user.
-
-## DATA FORMAT (Inside 'parseVoiceInteraction')
-{
-  "type": "action | clarification | response",
-  "intent": "select_seat | ask_preference | confirm_selection | navigate",
-  "reasoning": "Concierge reasoning",
-  "speech": "Your warm, natural spoken response",
-  "data": { "seat_id": "optional", "row": "optional", "section": "optional" },
-  "next_step": "await_user | execute_action"
-}
-`;
-
-export const DefaultSystemPrompt = getSkyVoiceSystemPrompt();
+## EXAMPLE TURN
+User: "I'd like a window seat near the front"
+→ You call parseVoiceInteraction ONCE with:
+  {
+    "type": "action",
+    "intent": "select_seat",
+    "reasoning": "User wants a front window seat",
+    "speech": "Great choice! I'll find the best front window seats for you.",
+    "next_step": "execute_action",
+    "data": { "section": "front" },
+    "constraints": { "location_preference": "window" },
+    "confidence": 0.95
+  }
+→ Then STOP. Do not speak or act again until the user speaks.
+`.trim();
 
 export const DefaultAudioOutputConfiguration = {
     ...DefaultAudioInputConfiguration,
     sampleRateHertz: 24000,
-    voiceId: "matthew",
+    voiceId: "tiffany",
 };
-

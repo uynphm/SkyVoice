@@ -12,8 +12,8 @@ def run_sighted_copilot() -> None:
 
     # --- SIMULATED SONIC BACKEND OUTPUT ---
     # These would come from your existing Bedrock Sonic client
-    user_intent = "aisle seat"
-    user_budget = 500
+    user_intent = "charlie puth"
+    user_budget = "minimum_price"
     
     print(f"\n🎙️ Sonic Intent Received: '{user_intent}' under ${user_budget}")
     print("🚀 Activating SkyVoice Browsing Layer...")
@@ -26,6 +26,7 @@ def run_sighted_copilot() -> None:
         headless=False,
         chrome_channel="chrome",
         ignore_screen_dims_check=True,
+        
     ) as nova:  
         
         # ONE POWERFUL PROMPT:

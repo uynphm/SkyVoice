@@ -79,6 +79,7 @@ export default function App() {
 
     const {
         isListening,
+        isSpeaking,
         toggleStreaming,
         volume,
         chromeId
@@ -214,7 +215,7 @@ export default function App() {
 
                             <div className="flex-1 text-center">
                                 <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest leading-none font-sans">
-                                    {isListening ? "Listening..." : "Paused"}
+                                    {!isListening ? "Paused" : isSpeaking ? "Speaking..." : "Listening..."}
                                 </p>
                             </div>
 
