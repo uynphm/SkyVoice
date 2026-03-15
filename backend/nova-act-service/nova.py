@@ -1,21 +1,65 @@
 import os
-import time
+import json
+import argparse
 from dotenv import load_dotenv
 from nova_act import NovaAct
 
-def run_sighted_copilot() -> None:
+def parse_payload() -> dict:
+    parser = argparse.ArgumentParser(description="Run Nova Act with booking payload from Sonic.")
+    parser.add_argument(
+        "--payload-json",
+        dest="payload_json",
+        default=None,
+        help="JSON payload from backend (Sonic entities).",
+    )
+    args = parser.parse_args()
+
+    raw_payload = args.payload_json or os.getenv("NOVA_ACTION_PAYLOAD")
+    if not raw_payload:
+        # Fallback for manual local test.
+        return {
+            "concert_name": "charlie puth",
+            "concert_datetime": "tomorrow 8pm",
+            "seat_preference": "aisle",
+        }
+
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid payload JSON: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("Payload must be a JSON object.")
+    return payload
+
+
+def run_sighted_copilot(payload: dict) -> None:
     load_dotenv()
     api_key = os.getenv("NOVA_ACT_API_KEY")
 
     if not api_key:
         raise RuntimeError("NOVA_ACT_API_KEY is missing. Add it to .env first.")
 
-    # --- SIMULATED SONIC BACKEND OUTPUT ---
-    # These would come from your existing Bedrock Sonic client
-    user_intent = "charlie puth"
-    user_budget = "minimum_price"
-    
-    print(f"\n🎙️ Sonic Intent Received: '{user_intent}' under ${user_budget}")
+    concert_name = (payload.get("concert_name") or "").strip()
+    concert_datetime = (payload.get("concert_datetime") or "").strip()
+    seat_preference = (payload.get("seat_preference") or "").strip()
+
+    missing = [
+        field_name
+        for field_name, field_value in {
+            "concert_name": concert_name,
+            "concert_datetime": concert_datetime,
+            "seat_preference": seat_preference,
+        }.items()
+        if not field_value
+    ]
+    if missing:
+        raise RuntimeError(f"Payload missing required field(s): {', '.join(missing)}")
+
+    print(
+        f"\n🎙️ Sonic Payload Received: concert='{concert_name}', "
+        f"datetime='{concert_datetime}', seat='{seat_preference}'"
+    )
     print("🚀 Activating SkyVoice Browsing Layer...")
 
     with NovaAct(
@@ -29,16 +73,13 @@ def run_sighted_copilot() -> None:
         
     ) as nova:  
         
-        # ONE POWERFUL PROMPT:
-        # We use the Sonic variables directly here.
-        # Since Act has built-in vision, it can handle the 'Aisle' detection itself.
         goal_prompt = (
-            f"I need to find a {user_intent} for under ${user_budget}. "
-            "1. Scroll the right-hand ticket list carefully. "
-            "2. Identify a ticket with an 'Aisle' label that fits the budget. "
-            "3. CLICK the ticket in the list. "
-            "4. Verify the map highlights it. Then HOVER to confirm. "
-            "If no 'Aisle' label is visible in the list, use the map to find a dot on the edge of a section."
+            f"Find tickets for '{concert_name}' at '{concert_datetime}'. "
+            f"Seat preference is '{seat_preference}'. "
+            "1. Search and navigate to the matching event page. "
+            "2. Open ticket options and find the best seat that matches preference. "
+            "3. Click the matched ticket and verify the selection is highlighted. "
+            "4. Stop after one valid option is selected."
         )
         
         try:
@@ -59,7 +100,6 @@ def run_sighted_copilot() -> None:
         except Exception as e:
             print(f"\n⚠️ The AI hit a snag: {e}")
 
-        input("\n👉 Press [ENTER] to detach.")
-
 if __name__ == "__main__":
-    run_sighted_copilot()
+    incoming_payload = parse_payload()
+    run_sighted_copilot(incoming_payload)

@@ -33,11 +33,10 @@ export const VoiceInteractionSchema = JSON.stringify({
         intent: {
             type: "string",
             enum: [
-                "select_seat",
-                "ask_preference",
-                "confirm_selection",
+                "collect_booking_info",
+                "confirm_booking_info",
+                "start_booking_action",
                 "navigate",
-                "summarize",
                 "fallback",
             ],
             description: "The specific intent parsed from the user's speech.",
@@ -60,13 +59,28 @@ export const VoiceInteractionSchema = JSON.stringify({
         },
         data: {
             type: "object",
-            description: "Payload for the intent (all fields optional).",
+            description: "Payload for intent execution and extracted entities.",
             properties: {
-                seat_id: { type: "string", description: "e.g. '14A'" },
-                row: { type: "number" },
-                section: {
-                    type: "string",
-                    description: "e.g. 'front', 'back', 'exit_row'",
+                entities: {
+                    type: "object",
+                    description: "Structured entities extracted from user speech.",
+                    properties: {
+                        concert_name: { type: "string" },
+                        concert_datetime: { type: "string" },
+                        seat_preference: { type: "string" },
+                    },
+                },
+                missing_fields: {
+                    type: "array",
+                    description: "Required fields still missing.",
+                    items: {
+                        type: "string",
+                        enum: ["concert_name", "concert_datetime", "seat_preference"],
+                    },
+                },
+                booking_ready: {
+                    type: "boolean",
+                    description: "True only when all required fields are present.",
                 },
             },
         },
@@ -91,7 +105,7 @@ export const VoiceInteractionSchema = JSON.stringify({
 });
 
 export const DefaultSystemPrompt = `
-You are SkyVoice, a premium voice concierge for airline passengers.
+You are SkyVoice, a premium voice concierge for concert ticket booking.
 
 ## CORE RULE — ONE TOOL CALL PER TURN
 Every time the user speaks, you MUST respond with exactly ONE call to
@@ -108,27 +122,57 @@ The TTS engine reads that field aloud — it is the only voice output.
 Keep speech warm, natural, and concise (1-2 sentences).
 
 ## PERSONALITY
-- Sound like a luxury airline concierge: warm, professional, proactive.
+- Sound like a luxury booking concierge: warm, professional, proactive.
 - Always greet the user if they start a new conversation.
 - Never be silent — even "hello" gets a friendly reply via the tool.
 
-## INTENT DETECTION
-- "window", "aisle", "front", "back", "legroom" → seat preference action.
-- "how much", "price", "cheapest" → summarize constraints.
-- Ambiguous input → ask_clarification with a short follow-up question.
-- Off-topic or invalid → type "error", intent "fallback".
+## REQUIRED WORKFLOW
+Collect 3 required fields from user conversation context:
+1) concert_name
+2) concert_datetime
+3) seat_preference
+
+On every turn, return:
+- data.entities (best known values)
+- data.missing_fields (exactly which required fields are missing)
+- data.booking_ready (true only when all 3 fields are available)
+
+If any required field is missing:
+- type = "clarification"
+- intent = "collect_booking_info"
+- next_step = "ask_clarification"
+- speech asks for only the missing field(s)
+
+If all required fields are present:
+- type = "action"
+- intent = "start_booking_action"
+- next_step = "execute_action"
+- speech confirms details briefly and says booking action is starting
+
+If user confirms details but adds no new field:
+- intent = "confirm_booking_info"
+
+Off-topic or invalid input:
+- type = "error", intent = "fallback"
 
 ## EXAMPLE TURN
-User: "I'd like a window seat near the front"
+User: "Book Charlie Puth tomorrow at 8pm, aisle seat please"
 → You call parseVoiceInteraction ONCE with:
   {
     "type": "action",
-    "intent": "select_seat",
-    "reasoning": "User wants a front window seat",
-    "speech": "Great choice! I'll find the best front window seats for you.",
+    "intent": "start_booking_action",
+    "reasoning": "All required booking fields are present.",
+    "speech": "Perfect, I have Charlie Puth, tomorrow at 8pm, and aisle seating. I am starting the booking now.",
     "next_step": "execute_action",
-    "data": { "section": "front" },
-    "constraints": { "location_preference": "window" },
+    "data": {
+      "entities": {
+        "concert_name": "Charlie Puth",
+        "concert_datetime": "tomorrow 8pm",
+        "seat_preference": "aisle"
+      },
+      "missing_fields": [],
+      "booking_ready": true
+    },
     "confidence": 0.95
   }
 → Then STOP. Do not speak or act again until the user speaks.

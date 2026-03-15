@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import { spawn } from 'node:child_process';
 import { Server } from 'socket.io';
 import { NovaSonicBidirectionalStreamClient, StreamSession } from './client';
 import { Buffer } from 'node:buffer';
@@ -11,6 +12,117 @@ import { SessionStore, SessionRecord } from './session-store';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const novaScriptPath = path.resolve(__dirname, '../nova-act-service/nova.py');
+const novaWorkingDirectory = path.resolve(__dirname, '../nova-act-service');
+
+type BookingField = 'concert_name' | 'concert_datetime' | 'seat_preference';
+type BookingSlots = Partial<Record<BookingField, string>>;
+
+const bookingStateBySocket = new Map<string, BookingSlots>();
+const novaActionInProgress = new Map<string, boolean>();
+
+function sanitizeString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const cleaned = value.trim();
+    return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function extractBookingSlots(payload: any): BookingSlots {
+    const data = payload?.data ?? {};
+    const entities = data?.entities ?? payload?.entities ?? data ?? {};
+
+    const concertName =
+        sanitizeString(entities?.concert_name) ||
+        sanitizeString(entities?.concertName) ||
+        sanitizeString(entities?.name_of_concert) ||
+        sanitizeString(entities?.event_name) ||
+        sanitizeString(entities?.artist);
+
+    const dateTime =
+        sanitizeString(entities?.concert_datetime) ||
+        sanitizeString(entities?.concertDateTime) ||
+        sanitizeString(entities?.date_time) ||
+        sanitizeString(entities?.datetime) ||
+        sanitizeString(entities?.event_datetime) ||
+        (() => {
+            const date = sanitizeString(entities?.date);
+            const time = sanitizeString(entities?.time);
+            if (!date) return undefined;
+            return time ? `${date} ${time}` : date;
+        })();
+
+    const seatPreference =
+        sanitizeString(entities?.seat_preference) ||
+        sanitizeString(entities?.seatPreference) ||
+        sanitizeString(entities?.seat) ||
+        sanitizeString(entities?.seat_type) ||
+        sanitizeString(entities?.location_preference) ||
+        sanitizeString(entities?.section);
+
+    return {
+        concert_name: concertName,
+        concert_datetime: dateTime,
+        seat_preference: seatPreference,
+    };
+}
+
+function mergeBookingSlots(previous: BookingSlots, next: BookingSlots): BookingSlots {
+    return {
+        concert_name: next.concert_name || previous.concert_name,
+        concert_datetime: next.concert_datetime || previous.concert_datetime,
+        seat_preference: next.seat_preference || previous.seat_preference,
+    };
+}
+
+function getMissingFields(slots: BookingSlots): BookingField[] {
+    const required: BookingField[] = ['concert_name', 'concert_datetime', 'seat_preference'];
+    return required.filter((field) => !sanitizeString(slots[field]));
+}
+
+async function runNovaAction(socketId: string, slots: BookingSlots): Promise<{ exitCode: number | null; stdout: string; stderr: string; }> {
+    return await new Promise((resolve, reject) => {
+        const pythonBin = process.env.NOVA_PYTHON_BIN || 'python';
+        const payload = {
+            session_id: socketId,
+            ...slots,
+        };
+
+        const child = spawn(
+            pythonBin,
+            [novaScriptPath, '--payload-json', JSON.stringify(payload)],
+            {
+                cwd: novaWorkingDirectory,
+                env: {
+                    ...process.env,
+                    PYTHONUTF8: '1',
+                },
+            }
+        );
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+            const text = data.toString();
+            stdout += text;
+            console.log(`[NovaAct ${socketId}] ${text.trim()}`);
+        });
+
+        child.stderr.on('data', (data) => {
+            const text = data.toString();
+            stderr += text;
+            console.error(`[NovaAct ${socketId}][stderr] ${text.trim()}`);
+        });
+
+        child.on('error', (error) => {
+            reject(error);
+        });
+
+        child.on('close', (exitCode) => {
+            resolve({ exitCode, stdout, stderr });
+        });
+    });
+}
 
 // Create Express app and HTTP server
 const app = express();
@@ -159,6 +271,7 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     session.onEvent('toolUse', async (data) => {
         console.log('Tool use detected:', data.toolName);
         socket.emit('toolUse', data);
+        let startedNovaAction = false;
 
         // Extract speech if present
         try {
@@ -171,7 +284,57 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
                     timestamp: new Date().toISOString()
                 });
             }
-        } catch (e) { }
+
+            const extractedSlots = extractBookingSlots(content);
+            const previousSlots = bookingStateBySocket.get(socket.id) || {};
+            const mergedSlots = mergeBookingSlots(previousSlots, extractedSlots);
+            bookingStateBySocket.set(socket.id, mergedSlots);
+
+            const missingFields = getMissingFields(mergedSlots);
+            socket.emit('bookingDataUpdate', {
+                entities: mergedSlots,
+                missingFields,
+                ready: missingFields.length === 0
+            });
+
+            if (missingFields.length > 0) {
+                console.log(`[${socket.id}] Waiting for missing booking fields: ${missingFields.join(', ')}`);
+                return;
+            }
+
+            if (novaActionInProgress.get(socket.id)) {
+                console.log(`[${socket.id}] Nova action already in progress, skipping duplicate trigger.`);
+                return;
+            }
+
+            novaActionInProgress.set(socket.id, true);
+            startedNovaAction = true;
+            socket.emit('novaActionStatus', { status: 'started', payload: mergedSlots });
+            console.log(`[${socket.id}] Booking payload complete. Triggering Nova action...`);
+
+            const result = await runNovaAction(socket.id, mergedSlots);
+            const success = result.exitCode === 0;
+
+            socket.emit('novaActionStatus', {
+                status: success ? 'completed' : 'failed',
+                payload: mergedSlots,
+                exitCode: result.exitCode,
+                error: success ? undefined : (result.stderr || `Nova process exited with code ${result.exitCode}`)
+            });
+
+            if (success) {
+                bookingStateBySocket.delete(socket.id);
+                console.log(`[${socket.id}] Nova action completed successfully.`);
+            } else {
+                console.error(`[${socket.id}] Nova action failed with code ${result.exitCode}`);
+            }
+        } catch (e) {
+            console.error(`[${socket.id}] Failed to process toolUse payload:`, e);
+        } finally {
+            if (startedNovaAction) {
+                novaActionInProgress.delete(socket.id);
+            }
+        }
     });
 
     session.onEvent('toolResult', (data) => {
@@ -244,6 +407,8 @@ io.on('connection', (socket) => {
                 try { bedrockClient.forceCloseSession(socket.id); } catch { }
                 socketSessions.delete(socket.id);
                 sessionStates.delete(socket.id);
+                bookingStateBySocket.delete(socket.id);
+                novaActionInProgress.delete(socket.id);
             }
 
             await createNewSession(socket);
@@ -317,6 +482,8 @@ io.on('connection', (socket) => {
                 }
                 socketSessions.delete(socket.id);
             }
+            bookingStateBySocket.delete(socket.id);
+            novaActionInProgress.delete(socket.id);
 
             // Create new session
             await createNewSession(socket);
@@ -489,6 +656,8 @@ io.on('connection', (socket) => {
             socketSessions.delete(socket.id);
             sessionStates.delete(socket.id);
             cleanupInProgress.delete(socket.id);
+            bookingStateBySocket.delete(socket.id);
+            novaActionInProgress.delete(socket.id);
 
             // Notify client that session is closed and ready for new chat
             socket.emit('sessionClosed');
@@ -502,6 +671,8 @@ io.on('connection', (socket) => {
                 socketSessions.delete(socket.id);
                 sessionStates.delete(socket.id);
                 cleanupInProgress.delete(socket.id);
+                bookingStateBySocket.delete(socket.id);
+                novaActionInProgress.delete(socket.id);
             } catch (forceError) {
                 console.error('Error during force cleanup:', forceError);
             }
@@ -557,6 +728,8 @@ io.on('connection', (socket) => {
         socketSessions.delete(socket.id);
         sessionStates.delete(socket.id);
         cleanupInProgress.delete(socket.id);
+        bookingStateBySocket.delete(socket.id);
+        novaActionInProgress.delete(socket.id);
 
         console.log(`Cleanup complete for disconnected client: ${socket.id}`);
     });

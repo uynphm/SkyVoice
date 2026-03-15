@@ -76,6 +76,7 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
                     final: true, // Treat textOutput as final since it's a complete chunk
                     role: normalizedRole
                 })
+
             }
         })
 

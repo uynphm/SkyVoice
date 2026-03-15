@@ -281,7 +281,7 @@ export class NovaSonicBidirectionalStreamClient {
             console.log(`[${sessionId}] initiateBidirectionalStreaming: Calling bedrockRuntimeClient.send...`);
             const response = await this.bedrockRuntimeClient.send(
                 new InvokeModelWithBidirectionalStreamCommand({
-                    modelId: "amazon.nova-2-sonic-v1:0",
+                    modelId: "amazon.nova-sonic-v1:0",
                     body: asyncIterable,
                 })
             );
@@ -632,9 +632,7 @@ export class NovaSonicBidirectionalStreamClient {
         this.addEventToSessionQueue(sessionId, {
             event: {
                 sessionStart: {
-                    sessionConfiguration: {
-                        inferenceConfig: session.inferenceConfig,
-                    }
+                    inferenceConfiguration: session.inferenceConfig,
                 }
             }
         });
