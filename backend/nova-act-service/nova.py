@@ -20,7 +20,7 @@ def parse_payload() -> dict:
         return {
             "concert_name": "charlie puth",
             "concert_datetime": "tomorrow 8pm",
-            "seat_preference": "aisle",
+            "budget": "$120",
         }
 
     try:
@@ -42,14 +42,14 @@ def run_sighted_copilot(payload: dict) -> None:
 
     concert_name = (payload.get("concert_name") or "").strip()
     concert_datetime = (payload.get("concert_datetime") or "").strip()
-    seat_preference = (payload.get("seat_preference") or "").strip()
+    budget = (payload.get("budget") or payload.get("seat_preference") or "").strip()
 
     missing = [
         field_name
         for field_name, field_value in {
             "concert_name": concert_name,
             "concert_datetime": concert_datetime,
-            "seat_preference": seat_preference,
+            "budget": budget,
         }.items()
         if not field_value
     ]
@@ -58,7 +58,7 @@ def run_sighted_copilot(payload: dict) -> None:
 
     print(
         f"\n🎙️ Sonic Payload Received: concert='{concert_name}', "
-        f"datetime='{concert_datetime}', seat='{seat_preference}'"
+        f"datetime='{concert_datetime}', budget='{budget}'"
     )
     print("🚀 Activating SkyVoice Browsing Layer...")
 
@@ -75,9 +75,9 @@ def run_sighted_copilot(payload: dict) -> None:
         
         goal_prompt = (
             f"Find tickets for '{concert_name}' at '{concert_datetime}'. "
-            f"Seat preference is '{seat_preference}'. "
+            f"Budget limit is '{budget}'. "
             "1. Search and navigate to the matching event page. "
-            "2. Open ticket options and find the best seat that matches preference. "
+            "2. Open ticket options and find one that fits the budget. "
             "3. Click the matched ticket and verify the selection is highlighted. "
             "4. Stop after one valid option is selected."
         )

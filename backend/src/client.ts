@@ -651,13 +651,9 @@ export class NovaSonicBidirectionalStreamClient {
                         mediaType: "text/plain",
                     },
                     audioOutputConfiguration: {
+                        ...DefaultAudioOutputConfiguration,
                         audioType: "SPEECH",
-                        mediaType: "audio/lpcm",
                         encoding: "base64",
-                        sampleRateHertz: 24000,
-                        sampleSizeBits: 16,
-                        channelCount: 1,
-                        voiceId: "matthew",
                     },
                     toolUseOutputConfiguration: {
                         mediaType: "application/json",
