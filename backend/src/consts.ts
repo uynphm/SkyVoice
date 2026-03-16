@@ -67,7 +67,7 @@ export const VoiceInteractionSchema = JSON.stringify({
                     properties: {
                         concert_name: { type: "string" },
                         concert_datetime: { type: "string" },
-                        seat_preference: { type: "string" },
+                        budget: { type: "string" },
                     },
                 },
                 missing_fields: {
@@ -75,7 +75,7 @@ export const VoiceInteractionSchema = JSON.stringify({
                     description: "Required fields still missing.",
                     items: {
                         type: "string",
-                        enum: ["concert_name", "concert_datetime", "seat_preference"],
+                        enum: ["concert_name", "concert_datetime", "budget"],
                     },
                 },
                 booking_ready: {
@@ -130,7 +130,7 @@ Keep speech warm, natural, and concise (1-2 sentences).
 Collect 3 required fields from user conversation context:
 1) concert_name
 2) concert_datetime
-3) seat_preference
+3) budget
 
 On every turn, return:
 - data.entities (best known values)
@@ -168,7 +168,7 @@ User: "Book Charlie Puth tomorrow at 8pm, aisle seat please"
       "entities": {
         "concert_name": "Charlie Puth",
         "concert_datetime": "tomorrow 8pm",
-        "seat_preference": "aisle"
+        "budget": "$120"
       },
       "missing_fields": [],
       "booking_ready": true
