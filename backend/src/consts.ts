@@ -67,7 +67,9 @@ export const VoiceInteractionSchema = JSON.stringify({
                     properties: {
                         concert_name: { type: "string" },
                         concert_datetime: { type: "string" },
+                        num_tickets: { type: "string" },
                         budget: { type: "string" },
+                        position_preference: { type: "string" },
                     },
                 },
                 missing_fields: {
@@ -75,7 +77,7 @@ export const VoiceInteractionSchema = JSON.stringify({
                     description: "Required fields still missing.",
                     items: {
                         type: "string",
-                        enum: ["concert_name", "concert_datetime", "budget"],
+                        enum: ["concert_name", "concert_datetime", "num_tickets", "budget", "position_preference"],
                     },
                 },
                 booking_ready: {
@@ -127,15 +129,17 @@ Keep speech warm, natural, and concise (1-2 sentences).
 - Never be silent — even "hello" gets a friendly reply via the tool.
 
 ## REQUIRED WORKFLOW
-Collect 3 required fields from user conversation context:
+Collect 5 required fields from user conversation context:
 1) concert_name
 2) concert_datetime
-3) budget
+3) num_tickets
+4) budget
+5) position_preference
 
 On every turn, return:
 - data.entities (best known values)
 - data.missing_fields (exactly which required fields are missing)
-- data.booking_ready (true only when all 3 fields are available)
+- data.booking_ready (true only when all 5 fields are available)
 
 If any required field is missing:
 - type = "clarification"
@@ -168,7 +172,9 @@ User: "Book Charlie Puth tomorrow at 8pm, aisle seat please"
       "entities": {
         "concert_name": "Charlie Puth",
         "concert_datetime": "tomorrow 8pm",
-        "budget": "$120"
+        "num_tickets": "2",
+        "budget": "$120 each",
+        "position_preference": "aisle seat"
       },
       "missing_fields": [],
       "booking_ready": true

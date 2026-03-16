@@ -16,7 +16,7 @@ const novaScriptPath = path.resolve(__dirname, '../nova-act-service/nova.py');
 const novaWorkingDirectory = path.resolve(__dirname, '../nova-act-service');
 const DUPLICATE_ACTION_COOLDOWN_MS = 15000;
 
-type BookingField = 'concert_name' | 'concert_datetime' | 'budget';
+type BookingField = 'concert_name' | 'concert_datetime' | 'num_tickets' | 'budget' | 'position_preference';
 type BookingSlots = Partial<Record<BookingField, string>>;
 
 const bookingStateBySocket = new Map<string, BookingSlots>();
@@ -59,19 +59,31 @@ function extractBookingSlots(payload: any): BookingSlots {
             return time ? `${date} ${time}` : date;
         })();
 
-    const budget =
+    const budgetEach =
         sanitizeString(entities?.budget) ||
+        sanitizeString(entities?.budget_each) ||
         sanitizeString(entities?.max_budget) ||
         sanitizeString(entities?.price_limit) ||
-        sanitizeString(entities?.max_price) ||
-        // Backward compatibility with old schema
+        sanitizeString(entities?.max_price);
+
+    const numTickets =
+        sanitizeString(entities?.num_tickets) ||
+        sanitizeString(entities?.number_of_ticket) ||
+        sanitizeString(entities?.ticket_count) ||
+        sanitizeString(entities?.quantity);
+
+    const positionPreference =
+        sanitizeString(entities?.position_preference) ||
+        sanitizeString(entities?.position_preferences) ||
         sanitizeString(entities?.seat_preference) ||
         sanitizeString(entities?.seatPreference);
 
     return {
         concert_name: concertName,
         concert_datetime: dateTime,
-        budget: budget,
+        num_tickets: numTickets,
+        budget: budgetEach,
+        position_preference: positionPreference,
     };
 }
 
@@ -79,7 +91,9 @@ function mergeBookingSlots(previous: BookingSlots, next: BookingSlots): BookingS
     return {
         concert_name: next.concert_name || previous.concert_name,
         concert_datetime: next.concert_datetime || previous.concert_datetime,
+        num_tickets: next.num_tickets || previous.num_tickets,
         budget: next.budget || previous.budget,
+        position_preference: next.position_preference || previous.position_preference,
     };
 }
 
@@ -88,7 +102,9 @@ function getMissingFields(slots: BookingSlots): BookingField[] {
     if (!sanitizeString(slots.concert_name)) missing.push('concert_name');
     const dateTime = sanitizeString(slots.concert_datetime);
     if (!dateTime || !hasTimeInfo(dateTime)) missing.push('concert_datetime');
+    if (!sanitizeString(slots.num_tickets)) missing.push('num_tickets');
     if (!sanitizeString(slots.budget)) missing.push('budget');
+    if (!sanitizeString(slots.position_preference)) missing.push('position_preference');
     return missing;
 }
 
@@ -96,7 +112,9 @@ function getPayloadSignature(slots: BookingSlots): string {
     return JSON.stringify({
         concert_name: sanitizeString(slots.concert_name) || '',
         concert_datetime: sanitizeString(slots.concert_datetime) || '',
+        num_tickets: sanitizeString(slots.num_tickets) || '',
         budget: sanitizeString(slots.budget) || '',
+        position_preference: sanitizeString(slots.position_preference) || '',
     });
 }
 
