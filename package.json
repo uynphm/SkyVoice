@@ -1,0 +1,8 @@
+{
+  "name": "skyvoice-platform",
+  "version": "1.0.0",
+  "description": "Unified SkyVoice Platform",
+  "scripts": {
+    "deploy": "npm install --prefix backend && npm install --prefix extension && npm run build --prefix extension && cd backend && node src/server.ts"
+  }
+}
