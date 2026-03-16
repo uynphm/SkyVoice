@@ -20,7 +20,9 @@ def parse_payload() -> dict:
         return {
             "concert_name": "charlie puth",
             "concert_datetime": "tomorrow 8pm",
+            "num_tickets": "2",
             "budget": "$120",
+            "position_preference": "center view",
         }
 
     try:
@@ -42,14 +44,18 @@ def run_sighted_copilot(payload: dict) -> None:
 
     concert_name = (payload.get("concert_name") or "").strip()
     concert_datetime = (payload.get("concert_datetime") or "").strip()
-    budget = (payload.get("budget") or payload.get("seat_preference") or "").strip()
+    num_tickets = (payload.get("num_tickets") or "").strip()
+    budget = (payload.get("budget") or "").strip()
+    position_pref = (payload.get("position_preference") or "").strip()
 
     missing = [
         field_name
         for field_name, field_value in {
             "concert_name": concert_name,
             "concert_datetime": concert_datetime,
+            "num_tickets": num_tickets,
             "budget": budget,
+            "position_preference": position_pref,
         }.items()
         if not field_value
     ]
@@ -58,7 +64,8 @@ def run_sighted_copilot(payload: dict) -> None:
 
     print(
         f"\n🎙️ Sonic Payload Received: concert='{concert_name}', "
-        f"datetime='{concert_datetime}', budget='{budget}'"
+        f"datetime='{concert_datetime}', tickets='{num_tickets}', "
+        f"budget='{budget}', position='{position_pref}'"
     )
     print("🚀 Activating SkyVoice Browsing Layer...")
 
@@ -75,11 +82,14 @@ def run_sighted_copilot(payload: dict) -> None:
         
         goal_prompt = (
             f"Find tickets for '{concert_name}' at '{concert_datetime}'. "
-            f"Budget limit is '{budget}'. "
+            f"Quantity: '{num_tickets}'. "
+            f"Budget limit: '{budget}'. "
+            f"Position preference: '{position_pref}'. "
             "1. Search and navigate to the matching event page. "
-            "2. Open ticket options and find one that fits the budget. "
-            "3. Click the matched ticket and verify the selection is highlighted. "
-            "4. Stop after one valid option is selected."
+            "2. Select the correct number of tickets and filter by position preference. "
+            "3. Find one that fits the budget. "
+            "4. Click the matched ticket and verify the selection is highlighted. "
+            "5. Stop after one valid option is selected."
         )
         
         try:
