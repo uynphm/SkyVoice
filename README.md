@@ -21,82 +21,93 @@ We've recently optimized the interaction pipeline to reach industry-leading snap
 
 - **`/extension`**: High-performance React-based Chrome Extension (Vite + Tailwind CSS). Features a glassmorphism design and real-time waveform visualization.
 - **`/backend`**: Node.js backend utilizing `amazon.nova-2-sonic-v1` for real-time multimodal bidirectional streaming.
+- **`/backend/nova-act-service`**: Python-based browsing layer using `nova-act` for autonomous UI manipulation.
 
 ## AI Pipeline Architecture 
 
 Our system orchestrates specialized Amazon Nova models to handle complex multimodal interactions:
 
 1. **Nova Sonic (Multimodal Reasoning)**: Sonic handles the high-performance raw audio processing and simultaneous visual reasoning. It analyzes the user's voice and the UI state (the seat map) in parallel to identify the optimal response.
-2. **Nova Act (Autonomous Execution)**: Once an intent is identified, Nova Act takes over the "acting" phase. It autonomously translates the AI's decision into precise browser interactions, such as selecting the exact coordinates for a window seat or navigating multipage booking flows.
+2. **Nova Act (Autonomous Execution)**: Once an intent is identified (e.g., "Book Charlie Puth with an aisle seat"), Nova Act takes over the "acting" phase. It autonomously translates the AI's decision into precise browser interactions.
 3. **Sonic TTS (Immediate Feedback)**: While Nova Act is manipulating the DOM, Sonic's TTS engine immediately begins streaming natural, low-latency audio feedback, ensuring the user feels a seamless, real-time response.
 
+---
+
 ## Getting Started
-### Nova Act Service Setup
 
-<<<<<<< HEAD
-### Nova Act Service Setup
+### 1. Prerequisites
 
-=======
->>>>>>> origin/main
-1. Navigate to the Nova Act service directory:
+- **Python 3.10+** (for Nova Act service)
+- **Node.js 18+** (for Backend and Extension)
+- **Google Chrome** (with a dedicated profile for automation)
+- **AWS Account** (with Bedrock Nova access in `us-east-1` or `us-west-2`)
+
+### 2. Chrome Remote Debugging Setup
+
+SkyVoice requires a Chrome instance running with **Remote Debugging** enabled so the AI can control the browser.
+
+1. **Close all existing Chrome instances**
+2. **Launch Chrome via Terminal** (Mac ARM):
+   ```bash
+   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$(pwd)/backend/nova-act-service/chrome_demo_profile"
+   ```
+3. **Navigate to the target website** (e.g., Ticketmaster or any page with a seat map) in this specific Chrome window.
+
+### 3. Nova Act Service Setup (Python)
+
+This service handles the actual clicking and searching on the web page.
+
+1. Navigate to the service directory:
    ```bash
    cd backend/nova-act-service
    ```
-2. Create a virtual environment and install dependencies:
+2. Create and activate a virtual environment:
    ```bash
-<<<<<<< HEAD
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-=======
    python -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
->>>>>>> origin/main
+   ```
+3. Install dependencies:
+   ```bash
    pip install -r requirements.txt
    ```
-3. Configure your `.env` file with your Nova Act API key:
+4. Create a `.env` file in `backend/nova-act-service/`:
    ```env
    NOVA_ACT_API_KEY=your_key_from_nova.amazon.com
-<<<<<<< HEAD
-   NOVA_ACT_TARGET_URL=http://localhost:5173/seat-demo.html
-   NOVA_ACT_HEADLESS=false
-   NOVA_ACT_PORT=5005
    ```
-4. Start the service:
+
+### 4. Backend Setup (Node.js)
+
+The backend orchestrates the voice stream and triggers the Python browsing layer.
+
+1. Navigate to the backend directory:
    ```bash
-   python main.py
+   cd backend
    ```
-   The service runs on port 5005 by default. Without a valid `NOVA_ACT_API_KEY`, it operates in dry-run mode (logs actions without opening a browser).
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Create a `.env` file in `backend/`:
+   ```env
+   AWS_ACCESS_KEY_ID=your_key
+   AWS_SECRET_ACCESS_KEY=your_secret
+   AWS_REGION=us-east-1
+   PORT=5004
+   # Point to your Python binary (especially if using a venv)
+   # Mac/Linux: ./nova-act-service/.venv/bin/python
+   # Windows: ./nova-act-service/.venv/Scripts/python.exe
+   NOVA_PYTHON_BIN=./nova-act-service/.venv/bin/python
 
-=======
+   # Supabase Persistence
+   SUPABASE_URL=your_project_url
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+   ```
+4. Start the server (Dev Mode):
+   ```bash
+   npx tsx src/server.ts
    ```
 
-#### Chrome Browser Setup for Nova Act (Sighted Mode)
-
-To allow the AI to attach to your physical browser for demos, you must launch Chrome with remote debugging enabled:
-
-1. **Quit all your Chrome browsers completely** (Cmd+Q on Mac, Alt+F4 on Windows).
-
-2. **Launch via Terminal**:
-   - **Mac (Apple Silicon)**:
-     ```bash
-     arch -arm64 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="$(pwd)/nova_profile"
-     ```
-   - **Windows**:
-     ```powershell
-     & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$pwd\nova_profile"
-     ```
-   *Note: Using a dedicated `--user-data-dir` ensures your main browser history/cookies remain isolated.*
-
-3. **Open your target page** (e.g., Ticketmaster or SeatGeek) in the new window.
-
-4. **Start the Sighted Copilot**:
-   - **Mac**: `arch -arm64 python nova.py`
-   - **Windows**: `python nova.py`
-
-**Troubleshooting Precision:**
-If the AI is clicking slightly off-target, ensure your browser window is at or near **1600x813** resolution. The `nova.py` script will attempt to snap the viewport to this "Golden Resolution" automatically for 1:1 coordinate precision.
->>>>>>> origin/main
-### Extension Setup
+### 5. Extension Setup (Chrome Side Panel)
 
 1. Navigate to the `extension` directory:
    ```bash
@@ -106,50 +117,29 @@ If the AI is clicking slightly off-target, ensure your browser window is at or n
    ```bash
    npm install
    ```
-3. Run in development mode:
+3. Run the development server:
    ```bash
    npm run dev
    ```
-4. Load the extension in Chrome:
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked" and select the `extension` folder (or `dist` after building).
+4. **Load into Chrome**:
+   - **Build the extension**: `npm run build` (This generates the `dist` folder).
+   - Open `chrome://extensions/` in Chrome.
+   - Enable **Developer mode** (top right).
+   - Click **Load unpacked**.
+   - Select the `extension/dist` folder.
+   - *Tip: The extension runs in the **Side Panel**. Open the Side Panel in Chrome and select "SkyVoice" from the dropdown.*
 
-### Backend Setup
+---
 
-1. Navigate to the `backend` directory:
-   ```bash
-   cd backend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create a `.env` file with your AWS credentials:
-   ```env
-   AWS_ACCESS_KEY_ID=your_key
-   AWS_SECRET_ACCESS_KEY=your_secret
-   AWS_REGION=us-east-1
-   ```
-4. Start the server:
-   ```bash
-   npx tsx src/server.ts
-   ```
+## AWS Permissions
 
-#### Option A: Quick Start (AWS Managed Policies)
-
-For rapid development (e.g., during a hackathon), you can attach the following **AWS Managed Policies** directly to your IAM user:
+### Option A: Quick Start (AWS Managed Policies)
+Attach these to your IAM user for hackathon speed:
 - `AmazonBedrockFullAccess`
-- `AWSLambda_FullAccess`
-- `AmazonAPIGatewayAdministrator`
-- `AmazonS3FullAccess`
-- `AWSCloudFormationFullAccess`
-- `IAMFullAccess`
+- `IAMFullAccess` (to manage keys)
 
-#### Option B: Recommended (Least Privilege Policy)
-
-Navigate to the **IAM Console** > **Policies** > **Create policy**, select the **JSON** tab, and paste:
-
+### Option B: Least Privilege (Recommended)
+Create a custom policy with this JSON:
 ```json
 {
     "Version": "2012-10-17",
@@ -167,26 +157,11 @@ Navigate to the **IAM Console** > **Policies** > **Create policy**, select the *
 }
 ```
 
-#### How to setup IAM User via AWS Console (UI):
+---
 
-1. **Create the User**:
-   - Log in to your **AWS Console** and search for **IAM** in the top search bar.
-   - Select **Users** from the sidebar, then click the orange **Create user** button.
-   - **User details**: Give your user a name (like `skyvoice-local-dev`) and click **Next**.
-   - **Permissions options**: Choose the box that says **Attach policies directly**.
-   - **Permissions policies**: Use the search box to find and check the boxes for these 6 policies:
-     - `AmazonBedrockFullAccess`
-     - `AWSLambda_FullAccess`
-     - `AmazonAPIGatewayAdministrator`
-     - `AmazonS3FullAccess`
-     - `AWSCloudFormationFullAccess`
-     - `IAMFullAccess`
-   - Click **Next**, then click **Create user**.
+## Common Gotchas & Troubleshooting
 
-2. **Generate Access Keys**:
-   - In the list of users, click on the name of the user you just created (`skyvoice-local-dev`).
-   - Click the **Security credentials** tab (located in the middle of the screen).
-   - Scroll down to the **Access keys** section and click **Create access key**.
-   - Select **Local code** as the reason, check the confirmation box, and click **Next**.
-   - Click **Create access key** on the final screen.
-   - **IMPORTANT**: Copy the **Access key ID** and **Secret access key** now. Paste them into your `backend/.env` file.
+- **Port Mismatch**: If the extension says "Connection Failed", ensure `backend/.env` has `PORT=5004`.
+- **Chrome Not Found**: If Nova Act fails to attach, double check that Chrome is running with `--remote-debugging-port=9222`.
+- **Microphone Permission**: The extension requires microphone access. If it doesn't prompt, check your Chrome site settings for `localhost`.
+- **Bedrock Region**: Nova Sonic is currently available in specific AWS regions (e.g., `us-east-1`). Ensure your `.env` matches your Bedrock model availability.
