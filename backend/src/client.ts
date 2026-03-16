@@ -281,7 +281,7 @@ export class NovaSonicBidirectionalStreamClient {
             console.log(`[${sessionId}] initiateBidirectionalStreaming: Calling bedrockRuntimeClient.send...`);
             const response = await this.bedrockRuntimeClient.send(
                 new InvokeModelWithBidirectionalStreamCommand({
-                    modelId: "amazon.nova-2-sonic-v1:0",
+                    modelId: "amazon.nova-sonic-v1:0",
                     body: asyncIterable,
                 })
             );
@@ -632,9 +632,7 @@ export class NovaSonicBidirectionalStreamClient {
         this.addEventToSessionQueue(sessionId, {
             event: {
                 sessionStart: {
-                    sessionConfiguration: {
-                        inferenceConfig: session.inferenceConfig,
-                    }
+                    inferenceConfiguration: session.inferenceConfig,
                 }
             }
         });
@@ -653,13 +651,9 @@ export class NovaSonicBidirectionalStreamClient {
                         mediaType: "text/plain",
                     },
                     audioOutputConfiguration: {
+                        ...DefaultAudioOutputConfiguration,
                         audioType: "SPEECH",
-                        mediaType: "audio/lpcm",
                         encoding: "base64",
-                        sampleRateHertz: 24000,
-                        sampleSizeBits: 16,
-                        channelCount: 1,
-                        voiceId: "matthew",
                     },
                     toolUseOutputConfiguration: {
                         mediaType: "application/json",

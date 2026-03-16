@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import { spawn } from 'node:child_process';
 import { Server } from 'socket.io';
 import { NovaSonicBidirectionalStreamClient, StreamSession } from './client';
 import { Buffer } from 'node:buffer';
@@ -11,6 +12,152 @@ import { SessionStore, SessionRecord } from './session-store';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const novaScriptPath = path.resolve(__dirname, '../nova-act-service/nova.py');
+const novaWorkingDirectory = path.resolve(__dirname, '../nova-act-service');
+const DUPLICATE_ACTION_COOLDOWN_MS = 15000;
+
+type BookingField = 'concert_name' | 'concert_datetime' | 'budget';
+type BookingSlots = Partial<Record<BookingField, string>>;
+
+const bookingStateBySocket = new Map<string, BookingSlots>();
+const novaActionInProgress = new Map<string, boolean>();
+const processedToolUseIdsBySocket = new Map<string, Set<string>>();
+const lastTriggeredPayloadBySocket = new Map<string, string>();
+const lastTriggeredAtBySocket = new Map<string, number>();
+
+function getChromeId(socket: any): string {
+    return socket?.handshake?.auth?.chromeId || socket.id;
+}
+
+function sanitizeString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const cleaned = value.trim();
+    return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function extractBookingSlots(payload: any): BookingSlots {
+    const data = payload?.data ?? {};
+    const entities = data?.entities ?? payload?.entities ?? data ?? {};
+
+    const concertName =
+        sanitizeString(entities?.concert_name) ||
+        sanitizeString(entities?.concertName) ||
+        sanitizeString(entities?.name_of_concert) ||
+        sanitizeString(entities?.event_name) ||
+        sanitizeString(entities?.artist);
+
+    const dateTime =
+        sanitizeString(entities?.concert_datetime) ||
+        sanitizeString(entities?.concertDateTime) ||
+        sanitizeString(entities?.date_time) ||
+        sanitizeString(entities?.datetime) ||
+        sanitizeString(entities?.event_datetime) ||
+        (() => {
+            const date = sanitizeString(entities?.date);
+            const time = sanitizeString(entities?.time);
+            if (!date) return undefined;
+            return time ? `${date} ${time}` : date;
+        })();
+
+    const budget =
+        sanitizeString(entities?.budget) ||
+        sanitizeString(entities?.max_budget) ||
+        sanitizeString(entities?.price_limit) ||
+        sanitizeString(entities?.max_price) ||
+        // Backward compatibility with old schema
+        sanitizeString(entities?.seat_preference) ||
+        sanitizeString(entities?.seatPreference);
+
+    return {
+        concert_name: concertName,
+        concert_datetime: dateTime,
+        budget: budget,
+    };
+}
+
+function mergeBookingSlots(previous: BookingSlots, next: BookingSlots): BookingSlots {
+    return {
+        concert_name: next.concert_name || previous.concert_name,
+        concert_datetime: next.concert_datetime || previous.concert_datetime,
+        budget: next.budget || previous.budget,
+    };
+}
+
+function getMissingFields(slots: BookingSlots): BookingField[] {
+    const missing: BookingField[] = [];
+    if (!sanitizeString(slots.concert_name)) missing.push('concert_name');
+    const dateTime = sanitizeString(slots.concert_datetime);
+    if (!dateTime || !hasTimeInfo(dateTime)) missing.push('concert_datetime');
+    if (!sanitizeString(slots.budget)) missing.push('budget');
+    return missing;
+}
+
+function getPayloadSignature(slots: BookingSlots): string {
+    return JSON.stringify({
+        concert_name: sanitizeString(slots.concert_name) || '',
+        concert_datetime: sanitizeString(slots.concert_datetime) || '',
+        budget: sanitizeString(slots.budget) || '',
+    });
+}
+
+function hasTimeInfo(value: string): boolean {
+    const lower = value.toLowerCase();
+    if (/\b\d{1,2}:\d{2}\b/.test(lower)) return true;
+    if (/\b\d{1,2}\s*(am|pm)\b/.test(lower)) return true;
+    if (/\b(morning|afternoon|evening|night|tonight|noon|midnight)\b/.test(lower)) return true;
+    return false;
+}
+
+function isBookingConfirmationSpeech(value: string | undefined): boolean {
+    if (!value) return false;
+    const lower = value.toLowerCase();
+    return /\b(i will book|i'll book|starting the booking|start booking|book the concert|proceed to book|go ahead and book)\b/.test(lower);
+}
+
+async function runNovaAction(socketId: string, slots: BookingSlots): Promise<{ exitCode: number | null; stdout: string; stderr: string; }> {
+    return await new Promise((resolve, reject) => {
+        const pythonBin = process.env.NOVA_PYTHON_BIN || 'python';
+        const payload = {
+            session_id: socketId,
+            ...slots,
+        };
+
+        const child = spawn(
+            pythonBin,
+            [novaScriptPath, '--payload-json', JSON.stringify(payload)],
+            {
+                cwd: novaWorkingDirectory,
+                env: {
+                    ...process.env,
+                    PYTHONUTF8: '1',
+                },
+            }
+        );
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+            const text = data.toString();
+            stdout += text;
+            console.log(`[NovaAct ${socketId}] ${text.trim()}`);
+        });
+
+        child.stderr.on('data', (data) => {
+            const text = data.toString();
+            stderr += text;
+            console.error(`[NovaAct ${socketId}][stderr] ${text.trim()}`);
+        });
+
+        child.on('error', (error) => {
+            reject(error);
+        });
+
+        child.on('close', (exitCode) => {
+            resolve({ exitCode, stdout, stderr });
+        });
+    });
+}
 
 // Create Express app and HTTP server
 const app = express();
@@ -45,6 +192,19 @@ const bedrockClient = new NovaSonicBidirectionalStreamClient({
 const socketSessions = new Map<string, StreamSession>();
 const sessionStore = new SessionStore();
 await sessionStore.init();
+
+async function ensureSessionRecord(chromeId: string, sessionId: string): Promise<void> {
+    const existing = await sessionStore.getSession(chromeId);
+    if (existing) return;
+    await sessionStore.saveSession({
+        chromeId,
+        sessionId,
+        status: 'ACTIVE',
+        history: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    });
+}
 
 // Session states
 enum SessionState {
@@ -141,7 +301,8 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('transcript', data);
 
         if (data.final) {
-            const chromeId = socket.handshake.auth.chromeId || socket.id;
+            const chromeId = getChromeId(socket);
+            await ensureSessionRecord(chromeId, socket.id);
             await sessionStore.addMessage(chromeId, {
                 role: 'USER',
                 text: data.text,
@@ -151,7 +312,6 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     });
 
     session.onEvent('audioOutput', (data) => {
-        console.log('Audio output received, sending to client');
         socket.emit('audioOutput', data);
     });
 
@@ -159,19 +319,118 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     session.onEvent('toolUse', async (data) => {
         console.log('Tool use detected:', data.toolName);
         socket.emit('toolUse', data);
+        let startedNovaAction = false;
 
         // Extract speech if present
         try {
+            const toolUseId = sanitizeString(data?.toolUseId || data?.toolUseID || data?.id);
+            if (toolUseId) {
+                const processedIds = processedToolUseIdsBySocket.get(socket.id) || new Set<string>();
+                if (processedIds.has(toolUseId)) {
+                    console.log(`[${socket.id}] Duplicate toolUseId ${toolUseId} ignored.`);
+                    return;
+                }
+                processedIds.add(toolUseId);
+                // Keep memory bounded
+                if (processedIds.size > 200) {
+                    const oldIds = Array.from(processedIds).slice(0, 100);
+                    oldIds.forEach((id) => processedIds.delete(id));
+                }
+                processedToolUseIdsBySocket.set(socket.id, processedIds);
+            }
+
             const content = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
             if (content?.speech) {
-                const chromeId = socket.handshake.auth.chromeId || socket.id;
+                const chromeId = getChromeId(socket);
+                await ensureSessionRecord(chromeId, socket.id);
                 await sessionStore.addMessage(chromeId, {
                     role: 'ASSISTANT',
                     text: content.speech,
                     timestamp: new Date().toISOString()
                 });
             }
-        } catch (e) { }
+
+            const extractedSlots = extractBookingSlots(content);
+            const previousSlots = bookingStateBySocket.get(socket.id) || {};
+            const mergedSlots = mergeBookingSlots(previousSlots, extractedSlots);
+            bookingStateBySocket.set(socket.id, mergedSlots);
+
+            const missingFields = getMissingFields(mergedSlots);
+            socket.emit('bookingDataUpdate', {
+                entities: mergedSlots,
+                missingFields,
+                ready: missingFields.length === 0
+            });
+
+            if (missingFields.length > 0) {
+                console.log(`[${socket.id}] Waiting for missing booking fields: ${missingFields.join(', ')}`);
+                return;
+            }
+
+            const nextStep = sanitizeString(content?.next_step);
+            const intent = sanitizeString(content?.intent);
+            const bookingReady = content?.data?.booking_ready === true;
+            const declaredMissing = Array.isArray(content?.data?.missing_fields) ? content.data.missing_fields : [];
+            const speech = sanitizeString(content?.speech);
+            const isExecuteAction = nextStep === 'execute_action';
+            const isActionIntent = intent === 'start_booking_action' || intent === 'confirm_booking_info';
+            const confirmedBySpeech = isBookingConfirmationSpeech(speech);
+            const shouldRunNova =
+                bookingReady &&
+                declaredMissing.length === 0 &&
+                missingFields.length === 0 &&
+                isActionIntent &&
+                (isExecuteAction || confirmedBySpeech);
+
+            if (!shouldRunNova) {
+                console.log(`[${socket.id}] Booking data received but not confirmed for action yet.`);
+                return;
+            }
+
+            const payloadSignature = getPayloadSignature(mergedSlots);
+            const lastPayload = lastTriggeredPayloadBySocket.get(socket.id);
+            const lastTriggeredAt = lastTriggeredAtBySocket.get(socket.id) || 0;
+            const withinCooldown = Date.now() - lastTriggeredAt < DUPLICATE_ACTION_COOLDOWN_MS;
+            if (lastPayload === payloadSignature && withinCooldown) {
+                console.log(`[${socket.id}] Duplicate payload within cooldown, skipping Nova trigger.`);
+                return;
+            }
+
+            if (novaActionInProgress.get(socket.id)) {
+                console.log(`[${socket.id}] Nova action already in progress, skipping duplicate trigger.`);
+                return;
+            }
+
+            novaActionInProgress.set(socket.id, true);
+            startedNovaAction = true;
+            lastTriggeredPayloadBySocket.set(socket.id, payloadSignature);
+            lastTriggeredAtBySocket.set(socket.id, Date.now());
+            socket.emit('novaActionStatus', { status: 'started', payload: mergedSlots });
+            console.log(`[${socket.id}] Booking payload complete. Triggering Nova action...`);
+
+            const result = await runNovaAction(socket.id, mergedSlots);
+            const success = result.exitCode === 0;
+
+            socket.emit('novaActionStatus', {
+                status: success ? 'completed' : 'failed',
+                payload: mergedSlots,
+                exitCode: result.exitCode,
+                error: success ? undefined : (result.stderr || `Nova process exited with code ${result.exitCode}`)
+            });
+
+            if (success) {
+                bookingStateBySocket.delete(socket.id);
+                console.log(`[${socket.id}] Nova action completed successfully.`);
+            } else {
+                console.error(`[${socket.id}] Nova action failed with code ${result.exitCode}`);
+            }
+        } catch (e) {
+            console.error(`[${socket.id}] Failed to process toolUse payload:`, e);
+        } finally {
+            if (startedNovaAction) {
+                novaActionInProgress.delete(socket.id);
+            }
+        }
     });
 
     session.onEvent('toolResult', (data) => {
@@ -184,7 +443,8 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
         socket.emit('contentEnd', data);
         
         try {
-            const chromeId = socket.handshake.auth.chromeId || socket.id;
+            const chromeId = getChromeId(socket);
+            await ensureSessionRecord(chromeId, socket.id);
             await sessionStore.addContentEndEvent(chromeId, data);
         } catch (e) {
             console.error('Error saving contentEnd event:', e);
@@ -212,13 +472,15 @@ io.on('connection', (socket) => {
     }, 60000);
 
     // Handle session initialization request
-    socket.on('initializeConnection', async (callback) => {
+    socket.on('initializeConnection', async (payloadOrCallback, maybeCallback) => {
+        const callback = typeof payloadOrCallback === 'function' ? payloadOrCallback : maybeCallback;
+        const payload = typeof payloadOrCallback === 'function' ? undefined : payloadOrCallback;
         try {
             const currentState = sessionStates.get(socket.id);
             console.log(`Initializing session for ${socket.id}, current state: ${currentState}`);
 
             // 0. Handle Persistence
-            const chromeId = callback?.chromeId || socket.id;
+            const chromeId = sanitizeString(payload?.chromeId) || getChromeId(socket);
             const existingRecord = await sessionStore.getSession(chromeId);
 
             if (existingRecord) {
@@ -244,6 +506,11 @@ io.on('connection', (socket) => {
                 try { bedrockClient.forceCloseSession(socket.id); } catch { }
                 socketSessions.delete(socket.id);
                 sessionStates.delete(socket.id);
+                bookingStateBySocket.delete(socket.id);
+                novaActionInProgress.delete(socket.id);
+                processedToolUseIdsBySocket.delete(socket.id);
+                lastTriggeredPayloadBySocket.delete(socket.id);
+                lastTriggeredAtBySocket.delete(socket.id);
             }
 
             await createNewSession(socket);
@@ -317,6 +584,11 @@ io.on('connection', (socket) => {
                 }
                 socketSessions.delete(socket.id);
             }
+            bookingStateBySocket.delete(socket.id);
+            novaActionInProgress.delete(socket.id);
+            processedToolUseIdsBySocket.delete(socket.id);
+            lastTriggeredPayloadBySocket.delete(socket.id);
+            lastTriggeredAtBySocket.delete(socket.id);
 
             // Create new session
             await createNewSession(socket);
@@ -489,6 +761,11 @@ io.on('connection', (socket) => {
             socketSessions.delete(socket.id);
             sessionStates.delete(socket.id);
             cleanupInProgress.delete(socket.id);
+            bookingStateBySocket.delete(socket.id);
+            novaActionInProgress.delete(socket.id);
+            processedToolUseIdsBySocket.delete(socket.id);
+            lastTriggeredPayloadBySocket.delete(socket.id);
+            lastTriggeredAtBySocket.delete(socket.id);
 
             // Notify client that session is closed and ready for new chat
             socket.emit('sessionClosed');
@@ -502,6 +779,11 @@ io.on('connection', (socket) => {
                 socketSessions.delete(socket.id);
                 sessionStates.delete(socket.id);
                 cleanupInProgress.delete(socket.id);
+                bookingStateBySocket.delete(socket.id);
+                novaActionInProgress.delete(socket.id);
+                processedToolUseIdsBySocket.delete(socket.id);
+                lastTriggeredPayloadBySocket.delete(socket.id);
+                lastTriggeredAtBySocket.delete(socket.id);
             } catch (forceError) {
                 console.error('Error during force cleanup:', forceError);
             }
@@ -557,6 +839,11 @@ io.on('connection', (socket) => {
         socketSessions.delete(socket.id);
         sessionStates.delete(socket.id);
         cleanupInProgress.delete(socket.id);
+        bookingStateBySocket.delete(socket.id);
+        novaActionInProgress.delete(socket.id);
+        processedToolUseIdsBySocket.delete(socket.id);
+        lastTriggeredPayloadBySocket.delete(socket.id);
+        lastTriggeredAtBySocket.delete(socket.id);
 
         console.log(`Cleanup complete for disconnected client: ${socket.id}`);
     });
@@ -600,6 +887,10 @@ process.on('SIGINT', async () => {
         console.log(`Closing ${activeSessions.length} active sessions...`);
 
         await Promise.all(activeSessions.map(async (sessionId) => {
+            if (cleanupInProgress.get(sessionId)) {
+                console.log(`Skipping close for ${sessionId} (cleanup already in progress)`);
+                return;
+            }
             try {
                 await bedrockClient.closeSession(sessionId);
                 console.log(`Closed session ${sessionId} during shutdown`);
