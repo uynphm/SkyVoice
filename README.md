@@ -16,6 +16,17 @@ SkyVoice is a state-of-the-art AI concierge that transforms complex, dynamic web
 
 ---
 
+## Tech Stack
+
+- **AI Orchestration**: Amazon Nova (Nova 2 Sonic for multimodal reasoning, Nova Act for autonomous execution)
+- **Real-time Communication**: AWS Bedrock Bidirectional Streaming, Socket.io
+- **Cloud Infrastructure**: AWS Bedrock, AWS ECS/Fargate, Docker
+- **Backend Architecture**: Node.js, Express, TypeScript, Python
+- **Experience Layer**: React, Vite, Tailwind CSS (Chrome Extension Side Panel)
+- **Data Persistence**: Supabase (PostgreSQL)
+
+---
+
 ## Deployment
 
 SkyVoice is designed for rapid deployment as a unified platform.
