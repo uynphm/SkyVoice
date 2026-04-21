@@ -65,10 +65,6 @@ export class StreamSession {
         this.client.setupStartAudioEvent(this.sessionId, audioConfig);
     }
 
-    // public async sendText(text: string): Promise<void> {
-    //     this.client.sendTextMessageEvent(this.sessionId, text);
-    // }
-
     // Stream audio for this session
     public async streamAudio(audioData: Buffer): Promise<void> {
         // Check queue size to avoid memory issues
@@ -721,50 +717,6 @@ export class NovaSonicBidirectionalStreamClient {
         });
     }
 
-    // public sendTextMessageEvent(sessionId: string, text: string): void {
-    //     const session = this.activeSessions.get(sessionId);
-    //     if (!session) return;
-
-    //     const textInputID = crypto.randomUUID();
-
-    //     // Text input start
-    //     this.addEventToSessionQueue(sessionId, {
-    //         event: {
-    //             contentStart: {
-    //                 promptName: session.promptName,
-    //                 contentName: textInputID,
-    //                 interactive: true,
-    //                 type: "TEXT",
-    //                 role: "USER",
-    //                 textInputConfiguration: {
-    //                     mediaType: "text/plain"
-    //                 }
-    //             }
-    //         }
-    //     });
-
-    //     // Text input content
-    //     this.addEventToSessionQueue(sessionId, {
-    //         event: {
-    //             textInput: {
-    //                 promptName: session.promptName,
-    //                 contentName: textInputID,
-    //                 content: text
-    //             }
-    //         }
-    //     });
-
-    //     // Text content end
-    //     this.addEventToSessionQueue(sessionId, {
-    //         event: {
-    //             contentEnd: {
-    //                 promptName: session.promptName,
-    //                 contentName: textInputID
-    //             }
-    //         }
-    //     });
-    // }
-
     public setupStartAudioEvent(
         sessionId: string,
         audioConfig: typeof DefaultAudioInputConfiguration = DefaultAudioInputConfiguration
@@ -849,7 +801,7 @@ export class NovaSonicBidirectionalStreamClient {
     // Send tool result back to the model
     private async sendToolResult(sessionId: string, toolUseId: string, result: any): Promise<void> {
         const session = this.activeSessions.get(sessionId);
-        console.log("inside tool result")
+
         if (!session || !session.isActive) return;
 
         console.log(`Sending tool result for session ${sessionId}, tool use ID: ${toolUseId}`);
@@ -962,31 +914,6 @@ export class NovaSonicBidirectionalStreamClient {
             throw new Error(`Session ${sessionId} not found`);
         }
         session.responseHandlers.set(eventType, handler);
-    }
-
-    // Dispatch an event to registered handlers
-    private dispatchEvent(sessionId: string, eventType: string, data: any): void {
-        const session = this.activeSessions.get(sessionId);
-        if (!session) return;
-
-        const handler = session.responseHandlers.get(eventType);
-        if (handler) {
-            try {
-                handler(data);
-            } catch (e) {
-                console.error(`Error in ${eventType} handler for session ${sessionId}:`, e);
-            }
-        }
-
-        // Also dispatch to "any" handlers
-        const anyHandler = session.responseHandlers.get('any');
-        if (anyHandler) {
-            try {
-                anyHandler({ type: eventType, data });
-            } catch (e) {
-                console.error(`Error in 'any' handler for session ${sessionId}:`, e);
-            }
-        }
     }
 
     public async closeSession(sessionId: string): Promise<void> {

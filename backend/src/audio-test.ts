@@ -88,7 +88,6 @@ async function runAudioTest() {
             pcmData = audioBuffer.subarray(44);
         }
 
-        console.log(`Streaming ${pcmData.length} bytes...`);
 
         const CHUNK_SIZE = 32768; // 32KB
         console.log(`Streaming ${pcmData.length} bytes in ${Math.ceil(pcmData.length / CHUNK_SIZE)} chunks...`);

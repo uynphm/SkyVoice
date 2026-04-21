@@ -25,6 +25,18 @@ const processedToolUseIdsBySocket = new Map<string, Set<string>>();
 const lastTriggeredPayloadBySocket = new Map<string, string>();
 const lastTriggeredAtBySocket = new Map<string, number>();
 
+/** Remove all per-socket tracking state. */
+function clearSocketState(socketId: string): void {
+    socketSessions.delete(socketId);
+    sessionStates.delete(socketId);
+    cleanupInProgress.delete(socketId);
+    bookingStateBySocket.delete(socketId);
+    novaActionInProgress.delete(socketId);
+    processedToolUseIdsBySocket.delete(socketId);
+    lastTriggeredPayloadBySocket.delete(socketId);
+    lastTriggeredAtBySocket.delete(socketId);
+}
+
 function getChromeId(socket: any): string {
     return socket?.handshake?.auth?.chromeId || socket.id;
 }
@@ -522,13 +534,7 @@ io.on('connection', (socket) => {
             if (existingSession) {
                 console.log(`Cleaning up stale session for ${socket.id}`);
                 try { bedrockClient.forceCloseSession(socket.id); } catch { }
-                socketSessions.delete(socket.id);
-                sessionStates.delete(socket.id);
-                bookingStateBySocket.delete(socket.id);
-                novaActionInProgress.delete(socket.id);
-                processedToolUseIdsBySocket.delete(socket.id);
-                lastTriggeredPayloadBySocket.delete(socket.id);
-                lastTriggeredAtBySocket.delete(socket.id);
+                clearSocketState(socket.id);
             }
 
             await createNewSession(socket);
@@ -602,11 +608,7 @@ io.on('connection', (socket) => {
                 }
                 socketSessions.delete(socket.id);
             }
-            bookingStateBySocket.delete(socket.id);
-            novaActionInProgress.delete(socket.id);
-            processedToolUseIdsBySocket.delete(socket.id);
-            lastTriggeredPayloadBySocket.delete(socket.id);
-            lastTriggeredAtBySocket.delete(socket.id);
+            clearSocketState(socket.id);
 
             // Create new session
             await createNewSession(socket);
@@ -776,14 +778,7 @@ io.on('connection', (socket) => {
             await cleanupPromise;
 
             // Remove from tracking
-            socketSessions.delete(socket.id);
-            sessionStates.delete(socket.id);
-            cleanupInProgress.delete(socket.id);
-            bookingStateBySocket.delete(socket.id);
-            novaActionInProgress.delete(socket.id);
-            processedToolUseIdsBySocket.delete(socket.id);
-            lastTriggeredPayloadBySocket.delete(socket.id);
-            lastTriggeredAtBySocket.delete(socket.id);
+            clearSocketState(socket.id);
 
             // Notify client that session is closed and ready for new chat
             socket.emit('sessionClosed');
@@ -794,14 +789,7 @@ io.on('connection', (socket) => {
             // Force cleanup on error
             try {
                 bedrockClient.forceCloseSession(socket.id);
-                socketSessions.delete(socket.id);
-                sessionStates.delete(socket.id);
-                cleanupInProgress.delete(socket.id);
-                bookingStateBySocket.delete(socket.id);
-                novaActionInProgress.delete(socket.id);
-                processedToolUseIdsBySocket.delete(socket.id);
-                lastTriggeredPayloadBySocket.delete(socket.id);
-                lastTriggeredAtBySocket.delete(socket.id);
+                clearSocketState(socket.id);
             } catch (forceError) {
                 console.error('Error during force cleanup:', forceError);
             }
@@ -854,14 +842,7 @@ io.on('connection', (socket) => {
         }
 
         // Clean up tracking maps
-        socketSessions.delete(socket.id);
-        sessionStates.delete(socket.id);
-        cleanupInProgress.delete(socket.id);
-        bookingStateBySocket.delete(socket.id);
-        novaActionInProgress.delete(socket.id);
-        processedToolUseIdsBySocket.delete(socket.id);
-        lastTriggeredPayloadBySocket.delete(socket.id);
-        lastTriggeredAtBySocket.delete(socket.id);
+        clearSocketState(socket.id);
 
         console.log(`Cleanup complete for disconnected client: ${socket.id}`);
     });
