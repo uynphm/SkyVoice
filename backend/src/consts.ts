@@ -151,7 +151,7 @@ If all required fields are present:
 - type = "action"
 - intent = "start_booking_action"
 - next_step = "execute_action"
-- speech confirms details briefly and says booking action is starting
+- speech confirms details briefly and says ticket search results will appear on screen in a moment
 
 If user confirms details but adds no new field:
 - intent = "confirm_booking_info"
@@ -166,7 +166,7 @@ User: "Book Charlie Puth tomorrow at 8pm, aisle seat please"
     "type": "action",
     "intent": "start_booking_action",
     "reasoning": "All required booking fields are present.",
-    "speech": "Perfect, I have Charlie Puth, tomorrow at 8pm, and aisle seating. I am starting the booking now.",
+    "speech": "Perfect! I have Charlie Puth, tomorrow at 8pm, and aisle seating. Searching Ticketmaster now — results will appear on screen in a moment.",
     "next_step": "execute_action",
     "data": {
       "entities": {

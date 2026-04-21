@@ -1,29 +1,23 @@
 import 'dotenv/config';
 import express from 'express';
 import http from 'http';
-import path from 'path';
-import { spawn } from 'node:child_process';
 import { Server } from 'socket.io';
 import { NovaSonicBidirectionalStreamClient, StreamSession } from './client';
 import { Buffer } from 'node:buffer';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, join as pathJoin } from 'node:path';
 import { SessionStore, SessionRecord } from './session-store';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const novaScriptPath = path.resolve(__dirname, '../nova-act-service/nova.py');
-const novaWorkingDirectory = path.resolve(__dirname, '../nova-act-service');
-const DUPLICATE_ACTION_COOLDOWN_MS = 15000;
+const TICKETMASTER_BASE = 'https://app.ticketmaster.com/discovery/v2';
 
 type BookingField = 'concert_name' | 'concert_datetime' | 'num_tickets' | 'budget' | 'position_preference';
 type BookingSlots = Partial<Record<BookingField, string>>;
 
 const bookingStateBySocket = new Map<string, BookingSlots>();
-const novaActionInProgress = new Map<string, boolean>();
+const ticketSearchInProgress = new Map<string, boolean>();
 const processedToolUseIdsBySocket = new Map<string, Set<string>>();
-const lastTriggeredPayloadBySocket = new Map<string, string>();
-const lastTriggeredAtBySocket = new Map<string, number>();
 
 /** Remove all per-socket tracking state. */
 function clearSocketState(socketId: string): void {
@@ -31,10 +25,8 @@ function clearSocketState(socketId: string): void {
     sessionStates.delete(socketId);
     cleanupInProgress.delete(socketId);
     bookingStateBySocket.delete(socketId);
-    novaActionInProgress.delete(socketId);
+    ticketSearchInProgress.delete(socketId);
     processedToolUseIdsBySocket.delete(socketId);
-    lastTriggeredPayloadBySocket.delete(socketId);
-    lastTriggeredAtBySocket.delete(socketId);
 }
 
 function getChromeId(socket: any): string {
@@ -120,16 +112,6 @@ function getMissingFields(slots: BookingSlots): BookingField[] {
     return missing;
 }
 
-function getPayloadSignature(slots: BookingSlots): string {
-    return JSON.stringify({
-        concert_name: sanitizeString(slots.concert_name) || '',
-        concert_datetime: sanitizeString(slots.concert_datetime) || '',
-        num_tickets: sanitizeString(slots.num_tickets) || '',
-        budget: sanitizeString(slots.budget) || '',
-        position_preference: sanitizeString(slots.position_preference) || '',
-    });
-}
-
 function hasTimeInfo(value: string): boolean {
     const lower = value.toLowerCase();
     if (/\b\d{1,2}:\d{2}\b/.test(lower)) return true;
@@ -138,54 +120,60 @@ function hasTimeInfo(value: string): boolean {
     return false;
 }
 
-function isBookingConfirmationSpeech(value: string | undefined): boolean {
-    if (!value) return false;
-    const lower = value.toLowerCase();
-    return /\b(i will book|i'll book|starting the booking|start booking|book the concert|proceed to book|go ahead and book)\b/.test(lower);
+export interface TicketResult {
+    name: string;
+    date: string;
+    venue: string;
+    city: string;
+    priceMin?: number;
+    priceMax?: number;
+    url: string;
 }
 
-async function runNovaAction(socketId: string, slots: BookingSlots): Promise<{ exitCode: number | null; stdout: string; stderr: string; }> {
-    return await new Promise((resolve, reject) => {
-        const pythonBin = process.env.NOVA_PYTHON_BIN || 'python';
-        const payload = {
-            session_id: socketId,
-            ...slots,
+async function searchTickets(slots: BookingSlots): Promise<TicketResult[]> {
+    const apiKey = process.env.TICKETMASTER_API_KEY;
+    if (!apiKey) throw new Error('TICKETMASTER_API_KEY is not set in environment');
+
+    const params = new URLSearchParams({
+        apikey: apiKey,
+        keyword: slots.concert_name || '',
+        size: '5',
+        sort: 'date,asc',
+    });
+
+    if (slots.concert_datetime) {
+        // Parse a loose date hint — just attach as keyword if we can't parse it cleanly
+        const dateHint = slots.concert_datetime.toLowerCase();
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        if (dateHint.includes('tomorrow')) {
+            const d = tomorrow.toISOString().split('T')[0];
+            params.set('startDateTime', `${d}T00:00:00Z`);
+            params.set('endDateTime', `${d}T23:59:59Z`);
+        }
+    }
+
+    const url = `${TICKETMASTER_BASE}/events.json?${params.toString()}`;
+    console.log(`[Ticketmaster] GET ${url}`);
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Ticketmaster API error: ${res.status} ${res.statusText}`);
+
+    const json = await res.json() as any;
+    const events: any[] = json?._embedded?.events ?? [];
+
+    return events.slice(0, 3).map((ev: any) => {
+        const venue = ev._embedded?.venues?.[0];
+        const priceRange = ev.priceRanges?.[0];
+        return {
+            name: ev.name,
+            date: ev.dates?.start?.localDate ?? 'TBD',
+            venue: venue?.name ?? 'Unknown venue',
+            city: venue?.city?.name ?? 'Unknown city',
+            priceMin: priceRange?.min,
+            priceMax: priceRange?.max,
+            url: ev.url,
         };
-
-        const child = spawn(
-            pythonBin,
-            [novaScriptPath, '--payload-json', JSON.stringify(payload)],
-            {
-                cwd: novaWorkingDirectory,
-                env: {
-                    ...process.env,
-                    PYTHONUTF8: '1',
-                },
-            }
-        );
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            const text = data.toString();
-            stdout += text;
-            console.log(`[NovaAct ${socketId}] ${text.trim()}`);
-        });
-
-        child.stderr.on('data', (data) => {
-            const text = data.toString();
-            stderr += text;
-            console.error(`[NovaAct ${socketId}][stderr] ${text.trim()}`);
-        });
-
-        child.on('error', (error) => {
-            reject(error);
-        });
-
-        child.on('close', (exitCode) => {
-            resolve({ exitCode, stdout, stderr });
-        });
     });
 }
 
@@ -270,7 +258,7 @@ setInterval(() => {
 }, 60000);
 
 // Serve static files from the public directory
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(pathJoin(__dirname, '../public')));
 
 // Helper function to create and initialize a new session
 async function createNewSession(socket: any): Promise<StreamSession> {
@@ -349,9 +337,6 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     session.onEvent('toolUse', async (data) => {
         console.log('Tool use detected:', data.toolName);
         socket.emit('toolUse', data);
-        let startedNovaAction = false;
-
-        // Extract speech if present
         try {
             const toolUseId = sanitizeString(data?.toolUseId || data?.toolUseID || data?.id);
             if (toolUseId) {
@@ -401,65 +386,55 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
             const intent = sanitizeString(content?.intent);
             const bookingReady = content?.data?.booking_ready === true;
             const declaredMissing = Array.isArray(content?.data?.missing_fields) ? content.data.missing_fields : [];
-            const speech = sanitizeString(content?.speech);
             const isExecuteAction = nextStep === 'execute_action';
             const isActionIntent = intent === 'start_booking_action' || intent === 'confirm_booking_info';
-            const confirmedBySpeech = isBookingConfirmationSpeech(speech);
-            const shouldRunNova =
+            const shouldSearch =
                 bookingReady &&
                 declaredMissing.length === 0 &&
                 missingFields.length === 0 &&
                 isActionIntent &&
-                (isExecuteAction || confirmedBySpeech);
+                isExecuteAction;
 
-            if (!shouldRunNova) {
-                console.log(`[${socket.id}] Booking data received but not confirmed for action yet.`);
+            if (!shouldSearch) {
+                console.log(`[${socket.id}] Booking data received but not ready for search yet.`);
                 return;
             }
 
-            const payloadSignature = getPayloadSignature(mergedSlots);
-            const lastPayload = lastTriggeredPayloadBySocket.get(socket.id);
-            const lastTriggeredAt = lastTriggeredAtBySocket.get(socket.id) || 0;
-            const withinCooldown = Date.now() - lastTriggeredAt < DUPLICATE_ACTION_COOLDOWN_MS;
-            if (lastPayload === payloadSignature && withinCooldown) {
-                console.log(`[${socket.id}] Duplicate payload within cooldown, skipping Nova trigger.`);
+            if (ticketSearchInProgress.get(socket.id)) {
+                console.log(`[${socket.id}] Ticket search already in progress, skipping duplicate trigger.`);
                 return;
             }
 
-            if (novaActionInProgress.get(socket.id)) {
-                console.log(`[${socket.id}] Nova action already in progress, skipping duplicate trigger.`);
-                return;
-            }
+            ticketSearchInProgress.set(socket.id, true);
+            socket.emit('ticketSearchStatus', { status: 'searching', payload: mergedSlots });
+            console.log(`[${socket.id}] All fields collected — querying Ticketmaster...`);
 
-            novaActionInProgress.set(socket.id, true);
-            startedNovaAction = true;
-            lastTriggeredPayloadBySocket.set(socket.id, payloadSignature);
-            lastTriggeredAtBySocket.set(socket.id, Date.now());
-            socket.emit('novaActionStatus', { status: 'started', payload: mergedSlots });
-            console.log(`[${socket.id}] Booking payload complete. Triggering Nova action...`);
+            try {
+                const tickets = await searchTickets(mergedSlots);
+                console.log(`[${socket.id}] Ticketmaster returned ${tickets.length} result(s).`);
 
-            const result = await runNovaAction(socket.id, mergedSlots);
-            const success = result.exitCode === 0;
+                // Build a readable summary for Nova Sonic to read back
+                let speechSummary: string;
+                if (tickets.length === 0) {
+                    speechSummary = `I searched Ticketmaster for ${mergedSlots.concert_name} and couldn't find any matching events. Would you like to try different dates or a different artist?`;
+                } else {
+                    const top = tickets[0];
+                    const priceStr = top.priceMin != null
+                        ? `starting at $${top.priceMin}`
+                        : 'price not listed';
+                    speechSummary = `I found ${tickets.length} event${tickets.length > 1 ? 's' : ''} for ${mergedSlots.concert_name}. The top result is ${top.name} on ${top.date} at ${top.venue} in ${top.city}, ${priceStr}. I'm sending the full list to your screen now.`;
+                }
 
-            socket.emit('novaActionStatus', {
-                status: success ? 'completed' : 'failed',
-                payload: mergedSlots,
-                exitCode: result.exitCode,
-                error: success ? undefined : (result.stderr || `Nova process exited with code ${result.exitCode}`)
-            });
-
-            if (success) {
+                socket.emit('ticketSearchStatus', { status: 'completed', results: tickets, summary: speechSummary });
                 bookingStateBySocket.delete(socket.id);
-                console.log(`[${socket.id}] Nova action completed successfully.`);
-            } else {
-                console.error(`[${socket.id}] Nova action failed with code ${result.exitCode}`);
+            } catch (searchErr: any) {
+                console.error(`[${socket.id}] Ticketmaster search failed:`, searchErr.message);
+                socket.emit('ticketSearchStatus', { status: 'failed', error: searchErr.message });
             }
         } catch (e) {
             console.error(`[${socket.id}] Failed to process toolUse payload:`, e);
         } finally {
-            if (startedNovaAction) {
-                novaActionInProgress.delete(socket.id);
-            }
+            ticketSearchInProgress.delete(socket.id);
         }
     });
 
@@ -471,7 +446,7 @@ function setupSessionEventHandlers(session: StreamSession, socket: any) {
     session.onEvent('contentEnd', async (data) => {
         console.log('Content end received: ', data);
         socket.emit('contentEnd', data);
-        
+
         try {
             const chromeId = getChromeId(socket);
             await ensureSessionRecord(chromeId, socket.id);
