@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 
-export type AIState = "IDLE" | "LISTENING" | "SPEAKING" | "THINKING" | "SELECTING SEAT"
+export type AIState = "IDLE" | "LISTENING" | "SPEAKING" | "THINKING" | "SEARCHING" | "RESULTS_READY"
 
 interface StatusBannerProps {
     state: AIState
@@ -23,9 +23,13 @@ const stateConfig: Record<AIState, { label: string; className: string }> = {
         label: "THINKING",
         className: "bg-secondary text-foreground border-foreground",
     },
-    "SELECTING SEAT": {
-        label: "SELECTING SEAT",
-        className: "bg-primary text-primary-foreground border-primary",
+    SEARCHING: {
+        label: "SEARCHING",
+        className: "bg-yellow-500 text-black border-yellow-400",
+    },
+    RESULTS_READY: {
+        label: "RESULTS READY",
+        className: "bg-green-600 text-white border-green-500",
     },
 }
 

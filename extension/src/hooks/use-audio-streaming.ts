@@ -4,15 +4,16 @@ import { bufferToBase64 } from "@/lib/pcm-encoder"
 
 type Socket = any
 
-export type AIState = "IDLE" | "LISTENING" | "SPEAKING" | "THINKING" | "SELECTING SEAT"
+export type AIState = "IDLE" | "LISTENING" | "SPEAKING" | "THINKING" | "SEARCHING" | "RESULTS_READY"
 
 interface UseAudioStreamingProps {
     onTranscript?: (data: any) => void
     onAIStateChange?: (state: AIState) => void
     onHistory?: (history: any[]) => void
+    onTicketResults?: (data: any) => void
 }
 
-export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: UseAudioStreamingProps & { onHistory?: (h: any[]) => void } = {}) {
+export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory, onTicketResults }: UseAudioStreamingProps & { onHistory?: (h: any[]) => void } = {}) {
     const [isListening, setIsListening] = useState(false)
     const [sessionActive, setSessionActive] = useState(false)
     const [chromeId, setChromeId] = useState<string>("anonymous")
@@ -129,11 +130,27 @@ export function useAudioStreaming({ onTranscript, onAIStateChange, onHistory }: 
         })
 
         newSocket.on("toolResult", () => {
-            stateHandlerRef.current?.("SELECTING SEAT")
+            stateHandlerRef.current?.("THINKING")
             setTimeout(() => {
                 if (isActiveRef.current) stateHandlerRef.current?.("LISTENING")
                 else stateHandlerRef.current?.("IDLE")
-            }, 3000)
+            }, 2000)
+        })
+
+        newSocket.on("ticketSearchStatus", (data: any) => {
+            if (data?.status === 'searching') {
+                stateHandlerRef.current?.("SEARCHING")
+            } else if (data?.status === 'completed') {
+                stateHandlerRef.current?.("RESULTS_READY")
+                onTicketResults?.(data)
+                setTimeout(() => {
+                    if (isActiveRef.current) stateHandlerRef.current?.("LISTENING")
+                    else stateHandlerRef.current?.("IDLE")
+                }, 5000)
+            } else if (data?.status === 'failed') {
+                console.warn("[SOCKET] Ticket search failed:", data?.error)
+                stateHandlerRef.current?.(isActiveRef.current ? "LISTENING" : "IDLE")
+            }
         })
 
         newSocket.on("disconnect", () => {

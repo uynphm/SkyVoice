@@ -2,26 +2,27 @@
 
 **Voice Concierge for Autonomous Web Interactions**
 
-SkyVoice is a state-of-the-art AI concierge that transforms complex, dynamic web applications into intuitive, voice-driven experiences. Built on the Amazon Nova ecosystem, SkyVoice bridges the accessibility gap by translating intricate UI components—from interactive data tables to visual workflows—into natural conversation and autonomous browser actions.
+SkyVoice is a voice-powered concert ticket concierge built on Amazon Nova Sonic. Speak your booking preferences naturally — artist, date, number of tickets, budget, seating preference — and SkyVoice searches Ticketmaster in real time and surfaces matching events directly in the extension panel.
 
 ---
 
 ## Core Features
 
-- **Intelligent Structured Extraction**: Our Speak Then Act pipeline parses complex utterances into actionable dimensions for any web-based workflow.
-- **Hands-Free Autonomy**: Integrated Nova Act browsing layer that executes universal browser-level interactions (clicking, searching, filtering, and data entry) precisely based on voice intent.
-- **Low-Latency Neural Audio**: Powered by Nova Sonic TTS, delivering high-fidelity, human-like voice responses with sub-second response times.
-- **Smart Turn-Taking**: Backend-integrated Voice Activity Detection (VAD) layer that understands natural pauses, allowing for a fluid, hands-free conversational flow.
-- **Persistent Memory**: Full session persistence via Supabase, ensuring user preferences and conversation histories are preserved across sessions.
+- **Intelligent Structured Extraction**: Speak Then Act pipeline parses natural utterances into 5 booking fields (artist, date, tickets, budget, seating) using Nova Sonic's multimodal reasoning.
+- **Real-Time Ticket Search**: Calls the Ticketmaster Discovery API once all fields are collected — returns live event listings with venue, date, price range, and direct purchase links.
+- **Low-Latency Neural Audio**: Powered by Nova Sonic TTS with bidirectional AWS Bedrock streaming, delivering high-fidelity voice responses with sub-second latency.
+- **Smart Turn-Taking**: Backend-integrated Voice Activity Detection (VAD) that understands natural pauses for fluid, hands-free conversation.
+- **Persistent Memory**: Full session persistence via Supabase, preserving conversation history across sessions.
 
 ---
 
 ## Tech Stack
 
-- **AI Orchestration**: Amazon Nova (Nova 2 Sonic for multimodal reasoning, Nova Act for autonomous execution)
-- **Real-time Communication**: AWS Bedrock Bidirectional Streaming, Socket.io
+- **AI Orchestration**: Amazon Nova 2 Sonic (multimodal voice reasoning via AWS Bedrock bidirectional streaming)
+- **Ticket Data**: Ticketmaster Discovery API (real-time event search)
+- **Real-time Communication**: Socket.io (WebSocket)
 - **Cloud Infrastructure**: AWS Bedrock, AWS ECS/Fargate, Docker
-- **Backend Architecture**: Node.js, Express, TypeScript, Python
+- **Backend Architecture**: Node.js, Express, TypeScript
 - **Experience Layer**: React, Vite, Tailwind CSS (Chrome Extension Side Panel)
 - **Data Persistence**: Supabase (PostgreSQL)
 
@@ -51,8 +52,8 @@ SkyVoice is a state-of-the-art AI concierge that transforms complex, dynamic web
 │            │ AWS Bedrock                              │
 │            ▼                                          │
 │   ┌─────────────────┐    ┌────────────────────────┐  │
-│   │  Tool: parse     │──►│  Nova Act Service       │  │
-│   │  VoiceInteraction│    │  (Python + CDP)         │  │
+│   │  Tool: parse     │──►│  Ticketmaster API       │  │
+│   │  VoiceInteraction│    │  Discovery v2           │  │
 │   └─────────────────┘    └────────────────────────┘  │
 └──────────────────────────────────────────────────────┘
 ```
@@ -67,8 +68,7 @@ SkyVoice is a state-of-the-art AI concierge that transforms complex, dynamic web
 |------|---------|---------|
 | **Node.js** | v20+ | Backend server & extension build |
 | **npm** | v9+ | Dependency management |
-| **Python** | 3.10+ | Nova Act browsing agent |
-| **Google Chrome** | Latest | Extension host & CDP target |
+| **Google Chrome** | Latest | Extension host |
 
 ### 1. Clone and Install
 
@@ -99,23 +99,12 @@ PORT=5004
 # Supabase (required — session persistence)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# Ticketmaster (required — ticket search)
+TICKETMASTER_API_KEY=your_ticketmaster_api_key
 ```
 
-Create `backend/nova-act-service/.env` for the browsing agent:
-
-```env
-# Same AWS credentials as above
-AWS_ACCESS_KEY_ID=your_aws_access_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret_key
-AWS_REGION=us-east-1
-
-# Nova Act API key (required for autonomous browsing)
-NOVA_ACT_API_KEY=your_nova_act_api_key
-
-PORT=5004
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-```
+> Get a free Ticketmaster API key at [developer.ticketmaster.com](https://developer.ticketmaster.com).
 
 ### 3. Set Up Supabase
 
@@ -126,20 +115,7 @@ Run the schema in your Supabase SQL Editor:
 # This creates the sessions and messages tables with RLS policies
 ```
 
-### 4. Set Up Python Environment (Nova Act)
-
-```bash
-cd backend/nova-act-service
-python3 -m venv .venv
-source .venv/bin/activate        # macOS/Linux
-# .venv\Scripts\activate         # Windows
-
-pip install -r requirements.txt
-playwright install chromium
-cd ../..
-```
-
-### 5. Start the Backend
+### 4. Start the Backend
 
 ```bash
 cd backend
@@ -151,7 +127,7 @@ The server will start on `http://localhost:5004`. You should see:
 Server listening on port 5004
 ```
 
-### 6. Build & Load the Chrome Extension
+### 5. Build & Load the Chrome Extension
 
 ```bash
 # Build the extension
@@ -166,28 +142,6 @@ Then load it into Chrome:
 4. Select the `extension/dist/` folder
 5. The SkyVoice icon will appear in your toolbar
 6. Click the icon → **Open Side Panel** to start
-
-### 7. Launch Chrome with CDP (for Nova Act browsing)
-
-Nova Act needs a Chrome instance with remote debugging enabled:
-
-**macOS:**
-```bash
-# Quit Chrome completely first, then:
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
-```
-
-**Windows:**
-```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-```
-
-> **Note:** If Chrome is already running, it will refuse the debugging flag. Either quit Chrome entirely first, or use a temporary profile:
-> ```bash
-> /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
->   --remote-debugging-port=9222 \
->   --user-data-dir=/tmp/skyvoice-cdp
-> ```
 
 ---
 
@@ -205,7 +159,7 @@ This runs: `npm install` (both packages) → `extension build` → `node backend
 
 ## ECS (Containerized) Deployment
 
-The repository includes a production-ready `Dockerfile` that bundles the Node.js orchestration layer, Python browsing service, and Headless Chrome.
+The repository includes a production-ready `Dockerfile` with a Node.js 20 slim image — no Python or Chrome dependencies required.
 
 1. **Build and Push**:
    ```bash
@@ -217,7 +171,7 @@ The repository includes a production-ready `Dockerfile` that bundles the Node.js
 2. **ECS Configuration**:
    - **Task Role**: Ensure the task role has `bedrock:InvokeModelWithBidirectionalStream` permissions.
    - **Port**: Map container port `5004` to your host/load balancer.
-   - **Environment**: Inject your Supabase and AWS credentials via ECS Environment Variables.
+   - **Environment**: Inject your Supabase, AWS, and Ticketmaster credentials via ECS Environment Variables.
 
 ---
 
@@ -227,7 +181,7 @@ The repository includes a production-ready `Dockerfile` that bundles the Node.js
 SkyVoice/
 ├── backend/
 │   ├── src/
-│   │   ├── server.ts          # Main Socket.io server (voice + session orchestration)
+│   │   ├── server.ts          # Main Socket.io server (voice + Ticketmaster orchestration)
 │   │   ├── client.ts          # AWS Bedrock bidirectional stream client
 │   │   ├── consts.ts          # System prompt, schemas, audio config
 │   │   ├── session-store.ts   # Supabase session persistence
@@ -235,10 +189,6 @@ SkyVoice/
 │   │   ├── types.ts           # TypeScript type definitions
 │   │   ├── handler.ts         # AWS Lambda handler (serverless deployment)
 │   │   └── audio-test.ts      # Offline Sonic pipeline test
-│   ├── nova-act-service/
-│   │   ├── nova.py            # Nova Act autonomous browsing agent
-│   │   ├── requirements.txt   # Python dependencies
-│   │   └── .env               # Nova Act credentials
 │   ├── schema.sql             # Supabase database schema
 │   ├── package.json
 │   └── tsconfig.json
@@ -260,7 +210,7 @@ SkyVoice/
 │   ├── manifest.json          # Chrome Extension manifest v3
 │   ├── vite.config.ts
 │   └── package.json
-├── Dockerfile                 # Production container (Node + Python + Chrome)
+├── Dockerfile                 # Production container (Node.js 20 slim)
 ├── package.json               # Root workspace scripts
 └── README.md
 ```

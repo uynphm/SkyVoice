@@ -19,6 +19,7 @@ export default function App() {
     const [aiState, setAiState] = useState<AIState>("IDLE")
     const [messages, setMessages] = useState<Message[]>([])
     const [hasStarted, setHasStarted] = useState(false)
+    const [ticketResults, setTicketResults] = useState<any[]>([])
     const chatEndRef = useRef<HTMLDivElement>(null)
 
     const scrollToBottom = () => {
@@ -64,6 +65,10 @@ export default function App() {
         }
     }, [])
 
+    const onTicketResults = useCallback((data: any) => {
+        if (Array.isArray(data?.results)) setTicketResults(data.results)
+    }, [])
+
     const onHistory = useCallback((history: any[]) => {
         if (!Array.isArray(history)) return
         const formatted = history
@@ -86,7 +91,8 @@ export default function App() {
     } = useAudioStreaming({
         onTranscript,
         onAIStateChange: (state) => setAiState(state),
-        onHistory
+        onHistory,
+        onTicketResults,
     })
 
     const startSession = () => {
@@ -178,7 +184,7 @@ export default function App() {
                             <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center">
                                 <MessageSquare className="h-8 w-8 text-white/20" />
                             </div>
-                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "Book me a flight from Seattle to San Francisco."</p>
+                            <p className="text-gray-500 text-sm font-sans">No messages yet. Try saying "Book me tickets for Taylor Swift next Saturday, 2 tickets, under $200, floor section."</p>
                         </div>
                     )}
 
@@ -197,6 +203,35 @@ export default function App() {
                             />
                         </div>
                     ))}
+                    {ticketResults.length > 0 && (
+                        <div className="pt-2 pb-1 space-y-2">
+                            <p className="text-xs font-bold uppercase tracking-widest text-gray-500 font-sans px-1">
+                                Ticket Results
+                            </p>
+                            {ticketResults.map((result, i) => (
+                                <div key={i} className="rounded-xl border border-white/10 bg-[#1a1a1e] p-4 space-y-1">
+                                    <p className="text-sm font-bold text-white font-sans">{result.name}</p>
+                                    <p className="text-xs text-gray-400 font-sans">{result.venue} · {result.city}</p>
+                                    <p className="text-xs text-gray-500 font-sans">{result.date}</p>
+                                    {(result.priceMin != null || result.priceMax != null) && (
+                                        <p className="text-xs text-green-400 font-sans">
+                                            ${result.priceMin ?? '?'} – ${result.priceMax ?? '?'}
+                                        </p>
+                                    )}
+                                    {result.url && (
+                                        <a
+                                            href={result.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-2 inline-block rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500 transition-colors font-sans"
+                                        >
+                                            Buy Tickets
+                                        </a>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     <div ref={chatEndRef} />
                 </div>
 
